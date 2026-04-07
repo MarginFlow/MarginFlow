@@ -1,0 +1,11 @@
+<svg width="1400" height="420" viewBox="0 0 1400 420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1400" height="420" rx="36" fill="#FFFFFF"/>
+  <rect x="64" y="94" width="220" height="216" rx="32" fill="#FFFFFF" stroke="#D7EBDD" stroke-width="8"/>
+  <path d="M110 266H238" stroke="#D7EBDD" stroke-width="10" stroke-linecap="round"/>
+  <rect x="120" y="238" width="28" height="28" rx="10" fill="#86EFAC"/>
+  <rect x="158" y="214" width="28" height="52" rx="10" fill="#4ADE80"/>
+  <rect x="196" y="186" width="28" height="80" rx="10" fill="#16A34A"/>
+  <path d="M122 248C153 240 178 224 198 199C210 184 223 172 242 164" stroke="#166534" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="242" cy="164" r="12" fill="#166534"/>
+  <text x="340" y="252" fill="#14532D" font-family="Segoe UI, Arial, sans-serif" font-size="140" font-weight="700">Margin Flow</text>
+</svg>

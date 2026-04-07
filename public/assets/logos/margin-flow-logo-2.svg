@@ -1,0 +1,9 @@
+<svg width="960" height="320" viewBox="0 0 960 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="960" height="320" rx="36" fill="#F7FCF8"/>
+  <circle cx="160" cy="160" r="108" fill="#FFFFFF" stroke="#D7EBDD" stroke-width="8"/>
+  <path d="M160 96C124 96 96 124 96 160C96 210 160 246 160 246C160 246 224 210 224 160C224 124 196 96 160 96Z" fill="#16A34A"/>
+  <circle cx="160" cy="160" r="28" fill="#FFFFFF"/>
+  <path d="M157 144C147 144 140 150 140 158C140 167 147 171 156 174C165 177 170 180 170 186C170 193 164 197 156 197C149 197 143 194 138 190L132 202C138 207 146 210 155 211V222H166V210C179 208 188 199 188 186C188 173 181 167 169 162C161 159 157 156 157 152C157 148 161 145 167 145C173 145 178 147 182 149L188 138C184 135 178 132 168 131V120H157V131V144Z" fill="#166534"/>
+  <text x="332" y="156" fill="#14532D" font-family="Segoe UI, Arial, sans-serif" font-size="78" font-weight="700">Margin Flow</text>
+  <text x="336" y="200" fill="#4B5563" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="600">FAST LANE VISIBILITY. BETTER BROKER MARGINS.</text>
+</svg>
