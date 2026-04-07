@@ -371,6 +371,14 @@ button:disabled {
   color: var(--muted);
 }
 
+.site-footer {
+  margin-top: 20px;
+  padding: 8px 4px 20px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .mono {
   font-family: var(--mono);
 }
