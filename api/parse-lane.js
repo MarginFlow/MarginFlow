@@ -1,0 +1,230 @@
+function normalizeZip(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  const digits = String(value).match(/\d/g);
+  return digits ? digits.join("").slice(0, 5) : "";
+}
+
+function normalizeMoney(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed = Number(String(value).replace(/,/g, "").replace(/\$/g, "").trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function roundTo(value, digits) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function extractMcNumber(text) {
+  const match = String(text || "").match(/\bMC\s*#?\s*-?\s*(\d{4,8})\b/i);
+  return match ? match[1] : null;
+}
+
+function extractRateCandidates(text) {
+  const candidates = [];
+  const source = String(text || "");
+  const patterns = [
+    {
+      type: "per_mile",
+      regex: /(?:rate|can|do|cover|all in|offer|quote|my rate)?\s*[:=-]?\s*\$?\s*((?:\d{1,3}(?:,\d{3})+)|(?:\d{1,6}))(?:\.(\d{1,3}))?\s*(?:\/\s*(?:mi|mile)|per\s*mile|rpm)\b/gi,
+      baseScore: 10,
+    },
+    {
+      type: "total",
+      regex: /(?:rate(?: is)?|my rate(?: is)?|can do|can|cover|all in|offer|quote|for|flat|do)\s*[:=-]?\s*\$?\s*((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
+      baseScore: 12,
+    },
+    {
+      type: "total",
+      regex: /\$\s*((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
+      baseScore: 7,
+    },
+    {
+      type: "total",
+      regex: /\b((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
+      baseScore: 2,
+    },
+  ];
+
+  patterns.forEach((pattern) => {
+    let match;
+    while ((match = pattern.regex.exec(source)) !== null) {
+      const wholePart = match[1] || "";
+      const decimalPart = match[2] ? `.${match[2]}` : "";
+      const value = normalizeMoney(`${wholePart}${decimalPart}`);
+      const matchedText = match[0] || "";
+      const matchStart = match.index;
+      const matchEnd = match.index + matchedText.length;
+      const prevChar = matchStart > 0 ? source[matchStart - 1] : "";
+      const nextChar = matchEnd < source.length ? source[matchEnd] : "";
+
+      if (!Number.isFinite(value) || value <= 1) {
+        continue;
+      }
+      if (prevChar === "," || nextChar === ",") {
+        continue;
+      }
+
+      const context = source
+        .slice(Math.max(0, match.index - 36), Math.min(source.length, pattern.regex.lastIndex + 36))
+        .toLowerCase();
+
+      let score = pattern.baseScore;
+      if (/\brate\b|\bcan\b|\bdo\b|\bcover\b|\ball in\b|\bquote\b|\boffer\b/.test(context)) {
+        score += 4;
+      }
+      if (/\bmc\b|\bdot\b|\bphone\b|\bref\b|\bzip\b/.test(context)) {
+        score -= 6;
+      }
+      if (/\bpickup\b|\bdeliver\b|\bdrop\b/.test(context)) {
+        score -= 3;
+      }
+      if (value >= 100 && value <= 4000) {
+        score += 2;
+      }
+      if (value < 100 && pattern.type === "total") {
+        score -= 5;
+      }
+      if (value > 10000) {
+        score -= 10;
+      }
+
+      candidates.push({
+        type: pattern.type,
+        value,
+        score,
+        index: match.index,
+      });
+    }
+  });
+
+  return candidates.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    return right.index - left.index;
+  });
+}
+
+function detectLaneMatch(text, pickupZip, deliveryZip) {
+  const source = String(text || "").toLowerCase();
+  const pickup = normalizeZip(pickupZip);
+  const delivery = normalizeZip(deliveryZip);
+  const pickupMatch = pickup ? source.includes(pickup) : false;
+  const deliveryMatch = delivery ? source.includes(delivery) : false;
+
+  if (pickup && delivery) {
+    return pickupMatch || deliveryMatch ? pickupMatch && deliveryMatch : false;
+  }
+  if (pickup) {
+    return pickupMatch;
+  }
+  if (delivery) {
+    return deliveryMatch;
+  }
+  return false;
+}
+
+function classifyMargin(marginPercent) {
+  if (!Number.isFinite(marginPercent)) {
+    return "UNKNOWN";
+  }
+  if (marginPercent >= 15) {
+    return "GREEN";
+  }
+  if (marginPercent >= 5) {
+    return "YELLOW";
+  }
+  return "RED";
+}
+
+function parseCarrierEmail(message, lane) {
+  const shipperRate = normalizeMoney(lane.shipperRate);
+  const pickupZip = normalizeZip(lane.pickupZip);
+  const deliveryZip = normalizeZip(lane.deliveryZip);
+  const body = message.bodyText || "";
+  const haystack = [
+    message.subject || "",
+    message.fromName || "",
+    message.fromAddress || "",
+    body,
+  ].join("\n");
+
+  const laneMatch = detectLaneMatch(haystack, pickupZip, deliveryZip);
+  const rateCandidates = extractRateCandidates(haystack);
+  const bestRate = rateCandidates[0] || null;
+  const carrierRate = bestRate ? roundTo(bestRate.value, 2) : null;
+  const marginPercent =
+    Number.isFinite(shipperRate) && shipperRate > 0 && Number.isFinite(carrierRate)
+      ? roundTo(((shipperRate - carrierRate) / shipperRate) * 100, 2)
+      : null;
+  const ignored = !laneMatch || (Number.isFinite(marginPercent) && marginPercent <= -50);
+
+  return {
+    id: message.id,
+    webLink: message.webLink || "",
+    subject: message.subject || "",
+    receivedDateTime: message.receivedDateTime || "",
+    fromName: message.fromName || "",
+    fromAddress: message.fromAddress || "",
+    carrierName: message.fromName || message.fromAddress || "Unknown carrier",
+    mcNumber: extractMcNumber(haystack),
+    carrierRate,
+    marginPercent,
+    classification: classifyMargin(marginPercent),
+    laneMatch,
+    ignored,
+    ignoreReason: !laneMatch
+      ? "Wrong lane"
+      : Number.isFinite(marginPercent) && marginPercent <= -50
+        ? "Margin <= -50%"
+        : null,
+    bodyPreview: body.slice(0, 280),
+  };
+}
+
+module.exports = async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  try {
+    const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+    const messages = Array.isArray(payload.messages) ? payload.messages : [];
+    const lane = payload.lane || {};
+
+    const parsed = messages.map((message) => parseCarrierEmail(message, lane));
+    const visible = parsed
+      .filter((item) => !item.ignored)
+      .sort((left, right) => {
+        if (left.carrierRate === null && right.carrierRate === null) {
+          return 0;
+        }
+        if (left.carrierRate === null) {
+          return 1;
+        }
+        if (right.carrierRate === null) {
+          return -1;
+        }
+        return left.carrierRate - right.carrierRate;
+      });
+
+    res.status(200).json({
+      results: visible,
+      hidden: parsed.filter((item) => item.ignored),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Parse failed" });
+  }
+};
