@@ -575,8 +575,8 @@ async function loadConversationThreads() {
   renderResults();
 }
 
-function renderThread(conversationId) {
-  const thread = state.conversationThreads[conversationId] || [];
+function renderThread(item) {
+  const thread = (state.conversationThreads[item.conversationId] || []).filter((message) => message.id !== item.id);
   if (!thread.length) {
     return '<div class="thread-empty">Conversation replies will appear here.</div>';
   }
@@ -765,7 +765,7 @@ function renderResults() {
             <a class="pill mono" href="${escapeHtml(item.webLink)}" target="_blank" rel="noreferrer">Open email</a>
             <span class="pill mono">${escapeHtml(item.receivedDateTime || "")}</span>
           </div>
-          ${renderThread(item.conversationId)}
+          ${renderThread(item)}
           <div class="reply-box">
             <textarea id="reply-${escapeHtml(item.id)}" class="reply-input" placeholder="Type a new price or message. Example: 1800"></textarea>
             <button class="primary-button send-button" type="button" data-send-id="${escapeHtml(item.id)}">Send Reply</button>
