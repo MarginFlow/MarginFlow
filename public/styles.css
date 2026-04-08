@@ -342,6 +342,12 @@ button:disabled {
   color: var(--red);
 }
 
+.negotiated-block {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(29, 41, 57, 0.1);
+}
+
 .reply-box {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

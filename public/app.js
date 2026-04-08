@@ -102,6 +102,116 @@ function isMailboxThrottleError(error) {
   return message.includes("ApplicationThrottled") || message.includes("MailboxConcurrency");
 }
 
+function extractRateCandidates(text) {
+  const candidates = [];
+  const source = String(text || "");
+  const patterns = [
+    /(?:rate(?: is)?|my rate(?: is)?|can do|can|cover|all in|offer|quote|for|flat|do)\s*[:=-]?\s*\$?\s*((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
+    /\$\s*((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
+    /\b((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
+  ];
+
+  patterns.forEach((regex, patternIndex) => {
+    let match;
+    while ((match = regex.exec(source)) !== null) {
+      const wholePart = match[1] || "";
+      const decimalPart = match[2] ? `.${match[2]}` : "";
+      const parsed = Number(`${wholePart}${decimalPart}`.replace(/,/g, "").replace(/\$/g, "").trim());
+      const matchedText = match[0] || "";
+      const matchStart = match.index;
+      const matchEnd = matchStart + matchedText.length;
+      const prevChar = matchStart > 0 ? source[matchStart - 1] : "";
+      const nextChar = matchEnd < source.length ? source[matchEnd] : "";
+
+      if (!Number.isFinite(parsed) || parsed <= 1) {
+        continue;
+      }
+      if (prevChar === "," || nextChar === ",") {
+        continue;
+      }
+
+      const context = source
+        .slice(Math.max(0, matchStart - 36), Math.min(source.length, regex.lastIndex + 36))
+        .toLowerCase();
+
+      let score = 4 - patternIndex;
+      if (/\brate\b|\bcan\b|\bdo\b|\bcover\b|\ball in\b|\bquote\b|\boffer\b/.test(context)) {
+        score += 4;
+      }
+      if (/\bmc\b|\bdot\b|\bphone\b|\bref\b|\bzip\b/.test(context)) {
+        score -= 6;
+      }
+      if (parsed >= 100 && parsed <= 4000) {
+        score += 2;
+      }
+      if (parsed > 10000) {
+        score -= 10;
+      }
+
+      candidates.push({
+        value: parsed,
+        score,
+        index: matchStart,
+      });
+    }
+  });
+
+  return candidates.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    return right.index - left.index;
+  });
+}
+
+function computeMarginPercent(rate) {
+  const shipperRate = normalizeMoney(getElement("shipper-rate").value);
+  if (!Number.isFinite(shipperRate) || shipperRate <= 0 || !Number.isFinite(rate)) {
+    return null;
+  }
+  return Math.round((((shipperRate - rate) / shipperRate) * 100) * 100) / 100;
+}
+
+function getNegotiatedDetails(item) {
+  const thread = state.conversationThreads[item.conversationId] || [];
+  if (!thread.length) {
+    return null;
+  }
+
+  const originalRate = Number.isFinite(item.carrierRate) ? item.carrierRate : null;
+  const carrierMessages = thread.filter((message) => classifyThreadAuthor(message) === "carrier");
+
+  for (let index = carrierMessages.length - 1; index >= 0; index -= 1) {
+    const message = carrierMessages[index];
+    const candidates = extractRateCandidates(message.bodyText || message.subject || "");
+    const candidate = candidates[0];
+    if (!candidate || !Number.isFinite(candidate.value)) {
+      continue;
+    }
+    if (originalRate !== null && Math.abs(candidate.value - originalRate) < 0.01) {
+      continue;
+    }
+
+    const negotiatedRate = Math.round(candidate.value * 100) / 100;
+    const marginPercent = computeMarginPercent(negotiatedRate);
+    return {
+      negotiatedRate,
+      marginPercent,
+      classification: classificationClass(
+        marginPercent === null
+          ? "RED"
+          : marginPercent >= 15
+            ? "GREEN"
+            : marginPercent >= 5
+              ? "YELLOW"
+              : "RED"
+      ),
+    };
+  }
+
+  return null;
+}
+
 function sortResults(results) {
   const sortValue = getElement("sort-by") ? getElement("sort-by").value : "rate-asc";
   const sorted = [...results];
@@ -109,6 +219,10 @@ function sortResults(results) {
   sorted.sort((left, right) => {
     const leftRate = Number.isFinite(left.carrierRate) ? left.carrierRate : null;
     const rightRate = Number.isFinite(right.carrierRate) ? right.carrierRate : null;
+    const leftNegotiated = getNegotiatedDetails(left);
+    const rightNegotiated = getNegotiatedDetails(right);
+    const leftNegotiatedRate = leftNegotiated && Number.isFinite(leftNegotiated.negotiatedRate) ? leftNegotiated.negotiatedRate : null;
+    const rightNegotiatedRate = rightNegotiated && Number.isFinite(rightNegotiated.negotiatedRate) ? rightNegotiated.negotiatedRate : null;
 
     if (sortValue === "rate-desc") {
       if (leftRate === null && rightRate === null) {
@@ -121,6 +235,19 @@ function sortResults(results) {
         return -1;
       }
       return rightRate - leftRate;
+    }
+
+    if (sortValue === "negotiated-asc") {
+      if (leftNegotiatedRate === null && rightNegotiatedRate === null) {
+        return 0;
+      }
+      if (leftNegotiatedRate === null) {
+        return 1;
+      }
+      if (rightNegotiatedRate === null) {
+        return -1;
+      }
+      return leftNegotiatedRate - rightNegotiatedRate;
     }
 
     if (leftRate === null && rightRate === null) {
@@ -482,6 +609,23 @@ function renderThread(conversationId) {
   `;
 }
 
+function renderNegotiatedSection(item) {
+  const negotiated = getNegotiatedDetails(item);
+  if (!negotiated) {
+    return "";
+  }
+
+  return `
+    <div class="negotiated-block">
+      <p class="rate-value ${negotiated.classification}">${escapeHtml(formatMoney(negotiated.negotiatedRate))}</p>
+      <p class="rate-label">Negotiated Rate</p>
+      <p class="margin-value ${negotiated.classification}">${
+        negotiated.marginPercent === null ? "New Margin N/A" : `New Margin ${escapeHtml(negotiated.marginPercent)}%`
+      }</p>
+    </div>
+  `;
+}
+
 async function sendReply(messageId) {
   const textarea = getElement(`reply-${messageId}`);
   const statusNode = getElement(`reply-status-${messageId}`);
@@ -610,6 +754,7 @@ function renderResults() {
               <p class="margin-value ${classificationClass(item.classification)}">${
                 item.marginPercent === null ? "Margin N/A" : `Margin ${escapeHtml(item.marginPercent)}%`
               }</p>
+              ${renderNegotiatedSection(item)}
             </div>
           </div>
           <div class="pill-row">
