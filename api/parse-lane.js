@@ -194,6 +194,42 @@ function parseCarrierEmail(message, lane) {
   };
 }
 
+function compareReceivedDate(left, right) {
+  const leftTime = left && left.receivedDateTime ? Date.parse(left.receivedDateTime) : 0;
+  const rightTime = right && right.receivedDateTime ? Date.parse(right.receivedDateTime) : 0;
+  return leftTime - rightTime;
+}
+
+function pickRepresentativeMessage(existing, candidate) {
+  if (!existing) {
+    return candidate;
+  }
+
+  const existingScore = Number.isFinite(existing.carrierRate) ? existing.carrierRate : Number.POSITIVE_INFINITY;
+  const candidateScore = Number.isFinite(candidate.carrierRate) ? candidate.carrierRate : Number.POSITIVE_INFINITY;
+
+  if (compareReceivedDate(candidate, existing) < 0) {
+    return candidate;
+  }
+
+  if (compareReceivedDate(candidate, existing) === 0 && candidateScore < existingScore) {
+    return candidate;
+  }
+
+  return existing;
+}
+
+function dedupeVisibleMessages(items) {
+  const byConversation = new Map();
+
+  items.forEach((item) => {
+    const key = item.conversationId || item.id;
+    byConversation.set(key, pickRepresentativeMessage(byConversation.get(key), item));
+  });
+
+  return Array.from(byConversation.values());
+}
+
 module.exports = async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -206,8 +242,9 @@ module.exports = async (req, res) => {
     const lane = payload.lane || {};
 
     const parsed = messages.map((message) => parseCarrierEmail(message, lane));
-    const visible = parsed
-      .filter((item) => !item.ignored)
+    const visible = dedupeVisibleMessages(
+      parsed.filter((item) => !item.ignored)
+    )
       .sort((left, right) => {
         if (left.carrierRate === null && right.carrierRate === null) {
           return 0;
