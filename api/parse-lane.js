@@ -172,6 +172,7 @@ function parseCarrierEmail(message, lane) {
 
   return {
     id: message.id,
+    conversationId: message.conversationId || "",
     webLink: message.webLink || "",
     subject: message.subject || "",
     receivedDateTime: message.receivedDateTime || "",

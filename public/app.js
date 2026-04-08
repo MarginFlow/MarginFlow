@@ -8,6 +8,7 @@ const state = {
   results: [],
   hidden: [],
   selectedIds: new Set(),
+  conversationThreads: {},
 };
 
 function getElement(id) {
@@ -75,6 +76,30 @@ function updateSummary() {
     .filter((value) => Number.isFinite(value))
     .sort((left, right) => left - right)[0];
   getElement("lowest-rate").textContent = Number.isFinite(lowestRate) ? formatMoney(lowestRate) : "-";
+}
+
+function normalizeThreadText(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function truncateText(value, limit = 260) {
+  const normalized = normalizeThreadText(value);
+  if (!normalized) {
+    return "No message body available.";
+  }
+  return normalized.length > limit ? `${normalized.slice(0, limit).trim()}...` : normalized;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isMailboxThrottleError(error) {
+  const message = String((error && error.message) || "");
+  return message.includes("ApplicationThrottled") || message.includes("MailboxConcurrency");
 }
 
 function sortResults(results) {
@@ -231,7 +256,7 @@ async function fetchInboxMessages() {
   setStatus(`Loading the last ${limit} inbox emails from Microsoft Graph...`);
 
   const result = await graphFetch(
-    `/me/mailFolders/inbox/messages?$top=${limit}&$select=id,subject,from,receivedDateTime,bodyPreview,body,webLink`
+    `/me/mailFolders/inbox/messages?$top=${limit}&$select=id,subject,from,receivedDateTime,bodyPreview,body,webLink,conversationId`
   );
 
   state.messages = (result.value || []).map((message) => ({
@@ -245,6 +270,7 @@ async function fetchInboxMessages() {
         ? message.body.content
         : message.bodyPreview || "",
     webLink: message.webLink || "",
+    conversationId: message.conversationId || "",
   }));
   state.loadedMessageCount = limit;
 
@@ -288,10 +314,14 @@ async function scanLane() {
   const payload = await response.json();
   state.results = payload.results || [];
   state.hidden = payload.hidden || [];
+  state.conversationThreads = {};
   state.selectedIds.clear();
   renderResults();
   updateSummary();
   setStatus(`Found ${state.results.length} relevant emails for this lane and hid ${state.hidden.length}.`);
+  loadConversationThreads().catch((error) => {
+    setStatus(`Loaded lane matches, but conversation threads failed: ${error.message}`);
+  });
 }
 
 function classificationClass(value) {
@@ -316,6 +346,140 @@ function buildReplyComment(rawValue) {
   }
 
   return trimmed;
+}
+
+function findResultById(messageId) {
+  return state.results.find((item) => item.id === messageId) || null;
+}
+
+function classifyThreadAuthor(message) {
+  const accountEmail = String(state.account && state.account.username ? state.account.username : "").toLowerCase();
+  const fromAddress = String(message.fromAddress || "").toLowerCase();
+  return accountEmail && fromAddress === accountEmail ? "broker" : "carrier";
+}
+
+async function fetchConversationThread(conversationId) {
+  if (!conversationId) {
+    return [];
+  }
+
+  const safeConversationId = String(conversationId).replace(/'/g, "''");
+  const filter = encodeURIComponent(`conversationId eq '${safeConversationId}'`);
+  const result = await graphFetch(
+    `/me/messages?$filter=${filter}&$top=25&$select=id,subject,from,receivedDateTime,bodyPreview,body,webLink,conversationId`
+  );
+
+  return (result && result.value ? result.value : [])
+    .map((message) => ({
+      id: message.id,
+      subject: message.subject || "",
+      fromName: message.from && message.from.emailAddress ? message.from.emailAddress.name || "" : "",
+      fromAddress: message.from && message.from.emailAddress ? message.from.emailAddress.address || "" : "",
+      receivedDateTime: message.receivedDateTime || "",
+      bodyText:
+        message.body && typeof message.body.content === "string" && message.body.content.trim()
+          ? message.body.content
+          : message.bodyPreview || "",
+      webLink: message.webLink || "",
+      conversationId: message.conversationId || "",
+    }))
+    .sort((left, right) => {
+      const leftTime = left.receivedDateTime ? Date.parse(left.receivedDateTime) : 0;
+      const rightTime = right.receivedDateTime ? Date.parse(right.receivedDateTime) : 0;
+      return leftTime - rightTime;
+    });
+}
+
+async function refreshThreadForMessage(messageId) {
+  const result = findResultById(messageId);
+  if (!result || !result.conversationId) {
+    return;
+  }
+
+  try {
+    const thread = await fetchConversationThread(result.conversationId);
+    state.conversationThreads[result.conversationId] = thread;
+    renderResults();
+  } catch (error) {
+    if (isMailboxThrottleError(error)) {
+      setStatus("Reply sent, but Outlook is rate-limiting thread refreshes right now. Try Refresh Inbox in a moment.");
+      return;
+    }
+    throw error;
+  }
+}
+
+async function loadConversationThreads() {
+  const conversationIds = Array.from(
+    new Set(
+      state.results
+        .map((item) => item.conversationId)
+        .filter(Boolean)
+    )
+  );
+
+  if (!conversationIds.length) {
+    return;
+  }
+
+  const nextThreads = {};
+  for (const conversationId of conversationIds) {
+    try {
+      nextThreads[conversationId] = await fetchConversationThread(conversationId);
+      renderResults();
+      await sleep(150);
+    } catch (error) {
+      if (isMailboxThrottleError(error)) {
+        state.conversationThreads = {
+          ...state.conversationThreads,
+          ...nextThreads,
+        };
+        renderResults();
+        throw new Error("Outlook is rate-limiting conversation history. Try Refresh Inbox in a moment.");
+      }
+      throw error;
+    }
+  }
+
+  state.conversationThreads = {
+    ...state.conversationThreads,
+    ...nextThreads,
+  };
+  renderResults();
+}
+
+function renderThread(conversationId) {
+  const thread = state.conversationThreads[conversationId] || [];
+  if (!thread.length) {
+    return '<div class="thread-empty">Conversation replies will appear here.</div>';
+  }
+
+  return `
+    <div class="thread-panel">
+      <p class="thread-title">Conversation</p>
+      <div class="thread-list">
+        ${thread
+          .map((message) => {
+            const authorType = classifyThreadAuthor(message);
+            const authorLabel =
+              authorType === "broker"
+                ? "You"
+                : escapeHtml(message.fromName || message.fromAddress || "Carrier");
+
+            return `
+              <article class="thread-item ${authorType}">
+                <div class="thread-head">
+                  <span class="thread-author">${authorLabel}</span>
+                  <span class="thread-date">${escapeHtml(message.receivedDateTime || "")}</span>
+                </div>
+                <p class="thread-body">${escapeHtml(truncateText(message.bodyText || message.subject || ""))}</p>
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
 }
 
 async function sendReply(messageId) {
@@ -344,6 +508,7 @@ async function sendReply(messageId) {
     if (statusNode) {
       statusNode.textContent = "Reply sent.";
     }
+    await refreshThreadForMessage(messageId);
   } catch (error) {
     setStatus(`Reply failed: ${error.message}`);
     if (statusNode) {
@@ -405,6 +570,7 @@ async function massReplyToSelected() {
       if (textarea) {
         textarea.value = "";
       }
+      await refreshThreadForMessage(messageId);
     } catch (error) {
       if (statusNode) {
         statusNode.textContent = `Mass reply failed: ${error.message}`;
@@ -448,13 +614,13 @@ function renderResults() {
           </div>
           <div class="pill-row">
             <span class="pill">MC ${escapeHtml(item.mcNumber || "Unknown")}</span>
-            <span class="pill">${escapeHtml(item.classification)}</span>
           </div>
           <p class="preview">${escapeHtml(item.bodyPreview || "No preview available.")}</p>
           <div class="pill-row">
             <a class="pill mono" href="${escapeHtml(item.webLink)}" target="_blank" rel="noreferrer">Open email</a>
             <span class="pill mono">${escapeHtml(item.receivedDateTime || "")}</span>
           </div>
+          ${renderThread(item.conversationId)}
           <div class="reply-box">
             <textarea id="reply-${escapeHtml(item.id)}" class="reply-input" placeholder="Type a new price or message. Example: 1800"></textarea>
             <button class="primary-button send-button" type="button" data-send-id="${escapeHtml(item.id)}">Send Reply</button>

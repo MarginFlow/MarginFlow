@@ -349,6 +349,72 @@ button:disabled {
   margin-top: 16px;
 }
 
+.thread-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(29, 41, 57, 0.1);
+  border-radius: 16px;
+  background: rgba(244, 251, 245, 0.88);
+}
+
+.thread-title {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.thread-list {
+  display: grid;
+  gap: 10px;
+}
+
+.thread-item {
+  padding: 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgba(29, 41, 57, 0.08);
+}
+
+.thread-item.broker {
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.18);
+}
+
+.thread-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.thread-author {
+  font-weight: 700;
+}
+
+.thread-date {
+  color: var(--muted);
+}
+
+.thread-body {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.thread-empty {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(244, 251, 245, 0.88);
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .reply-status {
   margin-top: 10px;
   font-size: 13px;
