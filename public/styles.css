@@ -526,10 +526,27 @@ button:disabled {
   color: var(--red);
 }
 
+.economics-grid {
+  display: grid;
+  justify-content: end;
+}
+
+.economics-grid.has-negotiated {
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.economics-block {
+  min-width: 0;
+}
+
 .negotiated-block {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(29, 41, 57, 0.1);
+  margin-top: 0;
+  padding-top: 0;
+  padding-left: 18px;
+  border-top: 0;
+  border-left: 1px solid rgba(29, 41, 57, 0.1);
 }
 
 .preview {
@@ -680,5 +697,18 @@ button:disabled {
   .rate-label,
   .margin-value {
     text-align: left;
+  }
+
+  .economics-grid.has-negotiated {
+    grid-template-columns: 1fr;
+    justify-content: start;
+  }
+
+  .negotiated-block {
+    margin-top: 14px;
+    padding-top: 14px;
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid rgba(29, 41, 57, 0.1);
   }
 }
