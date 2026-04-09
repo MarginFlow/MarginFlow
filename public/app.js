@@ -9,6 +9,7 @@ const state = {
   hidden: [],
   selectedIds: new Set(),
   conversationThreads: {},
+  lastSyncedAt: null,
 };
 
 function getElement(id) {
@@ -64,6 +65,25 @@ function updateActionState() {
   getElement("refresh-button").disabled = !signedIn;
   getElement("scan-lane-button").disabled = !(signedIn && hasLaneInputs());
   getElement("sign-out-button").disabled = !signedIn;
+  const connectionBadge = getElement("connection-badge");
+  if (connectionBadge) {
+    connectionBadge.textContent = signedIn ? "Microsoft inbox connected" : "Microsoft inbox not connected";
+    connectionBadge.className = signedIn ? "trust-pill connected" : "trust-pill";
+  }
+}
+
+function updateSyncText() {
+  const syncNode = getElement("sync-text");
+  if (!syncNode) {
+    return;
+  }
+
+  if (!state.lastSyncedAt) {
+    syncNode.textContent = "Last synced: not yet loaded";
+    return;
+  }
+
+  syncNode.textContent = `Last synced: ${state.lastSyncedAt.toLocaleString()}`;
 }
 
 function updateSummary() {
@@ -400,6 +420,8 @@ async function fetchInboxMessages() {
     conversationId: message.conversationId || "",
   }));
   state.loadedMessageCount = limit;
+  state.lastSyncedAt = new Date();
+  updateSyncText();
 
   setStatus(`Loaded ${state.messages.length} inbox emails. Scan the active lane when you're ready.`);
 }
@@ -856,6 +878,7 @@ async function initializeApp() {
   }
 
   updateActionState();
+  updateSyncText();
   updateSummary();
   renderResults();
   wireUi();
