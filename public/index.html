@@ -13,28 +13,39 @@
   <body>
     <main class="shell">
       <section class="hero">
-        <div>
-          <img class="hero-logo" src="./assets/logos/margin-flow-logo-3.svg" alt="Margin Flow" />
-          <h1>Streamline your carrier negotiatons with one click.</h1>
-          <p class="hero-copy">
-            Connect a Microsoft inbox, filter for a lane, and turn carrier replies
-            into a ranked checklist with carrier name, MC number, and price.
-          </p>
-          <div class="trust-row">
-            <span id="connection-badge" class="trust-pill">Microsoft inbox not connected</span>
-            <span id="sync-text" class="trust-note">Last synced: not yet loaded</span>
+        <div class="hero-layout">
+          <div class="hero-copy-block">
+            <img class="hero-logo" src="./assets/logos/margin-flow-logo-3.svg" alt="Margin Flow" />
+            <p class="eyebrow">Lane inbox triage for freight brokers</p>
+            <h1>Streamline your carrier negotiatons with one click.</h1>
+            <p class="hero-copy">
+              Connect a Microsoft inbox, filter by lane, and turn scattered carrier replies
+              into a clean board of rates, MC numbers, margins, and live email threads.
+            </p>
+            <div class="trust-row">
+              <span id="connection-badge" class="trust-pill">Microsoft inbox not connected</span>
+              <span id="sync-text" class="trust-note">Last synced: not yet loaded</span>
+            </div>
+          </div>
+          <div class="hero-command">
+            <p class="command-kicker">Quick Start</p>
+            <div class="hero-actions">
+              <button id="sign-in-button" class="primary-button" type="button">Sign In With Microsoft</button>
+              <button id="refresh-button" class="secondary-button" type="button" disabled>Refresh Inbox</button>
+              <button id="sign-out-button" class="ghost-button" type="button" disabled>Sign Out</button>
+            </div>
+            <div class="command-note">
+              Use one pickup ZIP, one dropoff ZIP, or both. Margin Flow will scan the inbox and surface only the emails worth your attention.
+            </div>
           </div>
         </div>
-        <div class="hero-actions">
-          <button id="sign-in-button" class="primary-button" type="button">Sign In With Microsoft</button>
-          <button id="refresh-button" class="secondary-button" type="button" disabled>Refresh Inbox</button>
-          <button id="sign-out-button" class="ghost-button" type="button" disabled>Sign Out</button>
+        <div class="status-shell">
+          <p id="status-text" class="status-text">Please sign in with your Outlook email.</p>
         </div>
-        <p id="status-text" class="status-text">Please sign in with your Outlook email.</p>
       </section>
 
       <section class="grid two-up">
-        <article class="panel">
+        <article class="panel lane-panel">
           <div class="panel-head">
             <h2>Lane Filter</h2>
             <span class="tag">Broker Input</span>
@@ -65,7 +76,7 @@
           <button id="scan-lane-button" class="primary-button full-width" type="button" disabled>Scan This Lane</button>
         </article>
 
-        <article class="panel">
+        <article class="panel snapshot-panel">
           <div class="panel-head">
             <h2>Lane Snapshot</h2>
             <span class="tag">Results</span>
@@ -99,22 +110,24 @@
           <h2>Relevant Carrier Emails</h2>
           <span class="tag">Checklist</span>
         </div>
-        <div class="bulk-bar">
-          <label class="field bulk-field">
-            <span>Mass Reply To Selected Carriers</span>
-            <textarea id="bulk-reply-input" placeholder="Type a number like 1800 or write a full message once for all selected carriers."></textarea>
-          </label>
-          <button id="mass-reply-button" class="secondary-button" type="button">Mass Reply</button>
-        </div>
-        <div class="sort-row">
-          <label class="field sort-field">
-            <span>Sort</span>
-            <select id="sort-by">
-              <option value="rate-asc" selected>Lowest Rate</option>
-              <option value="rate-desc">Highest Rate</option>
-              <option value="negotiated-asc">Lowest Negotiated Price</option>
-            </select>
-          </label>
+        <div class="results-toolbar">
+          <div class="bulk-bar">
+            <label class="field bulk-field">
+              <span>Mass Reply To Selected Carriers</span>
+              <textarea id="bulk-reply-input" placeholder="Type a number like 1800 or write a full message once for all selected carriers."></textarea>
+            </label>
+            <button id="mass-reply-button" class="secondary-button" type="button">Mass Reply</button>
+          </div>
+          <div class="sort-row">
+            <label class="field sort-field">
+              <span>Sort</span>
+              <select id="sort-by">
+                <option value="rate-asc" selected>Lowest Rate</option>
+                <option value="rate-desc">Highest Rate</option>
+                <option value="negotiated-asc">Lowest Negotiated Price</option>
+              </select>
+            </label>
+          </div>
         </div>
         <div id="results-list" class="results-list">
           <p class="empty-state">Sign in and scan a lane to load matching carrier emails.</p>
