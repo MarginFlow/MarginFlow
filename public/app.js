@@ -67,6 +67,9 @@ function updateActionState() {
   getElement("refresh-button").disabled = !signedIn;
   getElement("scan-lane-button").disabled = !(signedIn && hasLaneInputs());
   getElement("sign-out-button").disabled = !signedIn;
+  if (getElement("generate-test-emails-button")) {
+    getElement("generate-test-emails-button").disabled = !signedIn;
+  }
   const connectionBadge = getElement("connection-badge");
   if (connectionBadge) {
     connectionBadge.textContent = signedIn ? "Microsoft inbox connected" : "Microsoft inbox not connected";
@@ -677,6 +680,75 @@ function buildReplyComment(rawValue) {
   return trimmed;
 }
 
+function buildTestEmails() {
+  const lanes = [
+    { pickupZip: "30301", deliveryZip: "75201", subject: "Atlanta to Dallas available" },
+    { pickupZip: "60601", deliveryZip: "77001", subject: "Chicago to Houston quote" },
+    { pickupZip: "85001", deliveryZip: "90001", subject: "Phoenix to Los Angeles truck open" },
+  ];
+  const rates = [
+    950, 1025, 1100, 1175, 1200, 1250, 1300, 1350, 1425, 1500,
+    1575, 1600, 1650, 1700, 1775, 1800, 1850, 1900, 1975, 2000,
+    2050, 2100, 2200, 2300, 2450,
+  ];
+  const templates = [
+    (lane, rate, mc) => `rate is ${rate}\nmc ${mc}\n${lane.pickupZip} ${lane.deliveryZip}`,
+    (lane, rate, mc) => `can do $${rate} all in. mc# ${mc}. lane ${lane.pickupZip} to ${lane.deliveryZip}`,
+    (lane, rate, mc) => `hello dispatch\nmy rate ${rate}\nmc ${mc}\npickup ${lane.pickupZip} drop ${lane.deliveryZip}`,
+    (lane, rate, mc) => `$${rate}\nMC ${mc}\n${lane.pickupZip}-${lane.deliveryZip}`,
+  ];
+
+  return Array.from({ length: 25 }, (_, index) => {
+    const lane = lanes[index % lanes.length];
+    const rate = rates[index];
+    const mc = String(410000 + index);
+    const body = templates[index % templates.length](lane, rate, mc);
+    return {
+      subject: `${lane.subject} ${index + 1}`,
+      body,
+    };
+  });
+}
+
+async function generateTestEmails() {
+  if (!state.account || !state.account.username) {
+    setStatus("Sign in with Microsoft before generating test emails.");
+    return;
+  }
+
+  const target = state.account.username;
+  const emails = buildTestEmails();
+  let sentCount = 0;
+
+  setStatus("Generating 25 test emails...");
+
+  for (const email of emails) {
+    await graphFetch("/me/sendMail", {
+      method: "POST",
+      body: JSON.stringify({
+        message: {
+          subject: email.subject,
+          body: {
+            contentType: "Text",
+            content: email.body,
+          },
+          toRecipients: [
+            {
+              emailAddress: {
+                address: target,
+              },
+            },
+          ],
+        },
+        saveToSentItems: true,
+      }),
+    });
+    sentCount += 1;
+  }
+
+  setStatus(`Generated ${sentCount} test emails in the signed-in inbox.`);
+}
+
 function findResultById(messageId) {
   return state.results.find((item) => item.id === messageId) || null;
 }
@@ -996,6 +1068,13 @@ function wireUi() {
   getElement("sign-in-button").addEventListener("click", signIn);
   getElement("sign-out-button").addEventListener("click", signOut);
   getElement("refresh-button").addEventListener("click", fetchInboxMessages);
+  if (getElement("generate-test-emails-button")) {
+    getElement("generate-test-emails-button").addEventListener("click", () => {
+      generateTestEmails().catch((error) => {
+        setStatus(`Test email generation failed: ${error.message}`);
+      });
+    });
+  }
   getElement("mass-reply-button").addEventListener("click", () => {
     massReplyToSelected().catch((error) => {
       setStatus(`Mass reply failed: ${error.message}`);
