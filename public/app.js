@@ -2,6 +2,7 @@ const state = {
   msalInstance: null,
   msalReady: false,
   authBusy: false,
+  autoRefreshBusy: false,
   account: null,
   messages: [],
   loadedMessageCount: 0,
@@ -10,6 +11,7 @@ const state = {
   selectedIds: new Set(),
   conversationThreads: {},
   lastSyncedAt: null,
+  autoRefreshTimer: null,
 };
 
 function getElement(id) {
@@ -69,6 +71,31 @@ function updateActionState() {
   if (connectionBadge) {
     connectionBadge.textContent = signedIn ? "Microsoft inbox connected" : "Microsoft inbox not connected";
     connectionBadge.className = signedIn ? "trust-pill connected" : "trust-pill";
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+
+  if (!state.account) {
+    return;
+  }
+
+  state.autoRefreshTimer = window.setInterval(() => {
+    if (document.hidden || state.autoRefreshBusy || !state.account) {
+      return;
+    }
+
+    autoRefreshInbox().catch(() => {
+      // Keep background refresh silent so the page never feels interrupted.
+    });
+  }, 5000);
+}
+
+function stopAutoRefresh() {
+  if (state.autoRefreshTimer) {
+    window.clearInterval(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
   }
 }
 
@@ -190,6 +217,19 @@ function computeMarginPercent(rate) {
     return null;
   }
   return Math.round((((shipperRate - rate) / shipperRate) * 100) * 100) / 100;
+}
+
+function buildResultsSignature(results, hidden) {
+  return JSON.stringify({
+    results: (results || []).map((item) => ({
+      id: item.id,
+      conversationId: item.conversationId || "",
+      carrierRate: item.carrierRate,
+      marginPercent: item.marginPercent,
+      mcNumber: item.mcNumber || "",
+    })),
+    hidden: (hidden || []).map((item) => item.id),
+  });
 }
 
 function getNegotiatedDetails(item) {
@@ -392,15 +432,20 @@ async function signOut() {
     return;
   }
 
+  stopAutoRefresh();
+
   await state.msalInstance.logoutRedirect({
     account: state.account,
     postLogoutRedirectUri: getConfig().redirectUri,
   });
 }
 
-async function fetchInboxMessages() {
+async function fetchInboxMessages(options = {}) {
+  const { silent = false } = options;
   const limit = Number(getElement("scan-limit").value || 50);
-  setStatus(`Loading the last ${limit} inbox emails from Microsoft Graph...`);
+  if (!silent) {
+    setStatus(`Loading the last ${limit} inbox emails from Microsoft Graph...`);
+  }
 
   const result = await graphFetch(
     `/me/mailFolders/inbox/messages?$top=${limit}&$select=id,subject,from,receivedDateTime,bodyPreview,body,webLink,conversationId`
@@ -423,7 +468,145 @@ async function fetchInboxMessages() {
   state.lastSyncedAt = new Date();
   updateSyncText();
 
-  setStatus(`Loaded ${state.messages.length} inbox emails. Scan the active lane when you're ready.`);
+  if (!silent) {
+    setStatus(`Loaded ${state.messages.length} inbox emails. Scan the active lane when you're ready.`);
+  }
+}
+
+function captureUiSnapshot() {
+  const replyDrafts = {};
+  document.querySelectorAll(".reply-input").forEach((node) => {
+    if (node.id) {
+      replyDrafts[node.id] = node.value;
+    }
+  });
+
+  const activeElement = document.activeElement;
+  return {
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    bulkReply: getElement("bulk-reply-input") ? getElement("bulk-reply-input").value : "",
+    replyDrafts,
+    activeId: activeElement && activeElement.id ? activeElement.id : null,
+    selectionStart:
+      activeElement && typeof activeElement.selectionStart === "number" ? activeElement.selectionStart : null,
+    selectionEnd:
+      activeElement && typeof activeElement.selectionEnd === "number" ? activeElement.selectionEnd : null,
+  };
+}
+
+function restoreUiSnapshot(snapshot) {
+  if (!snapshot) {
+    return;
+  }
+
+  if (getElement("bulk-reply-input")) {
+    getElement("bulk-reply-input").value = snapshot.bulkReply || "";
+  }
+
+  Object.entries(snapshot.replyDrafts || {}).forEach(([id, value]) => {
+    const node = getElement(id);
+    if (node) {
+      node.value = value;
+    }
+  });
+
+  if (snapshot.activeId) {
+    const activeNode = getElement(snapshot.activeId);
+    if (activeNode) {
+      activeNode.focus({ preventScroll: true });
+      if (
+        typeof snapshot.selectionStart === "number" &&
+        typeof snapshot.selectionEnd === "number" &&
+        typeof activeNode.setSelectionRange === "function"
+      ) {
+        activeNode.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+      }
+    }
+  }
+
+  window.scrollTo(snapshot.scrollX, snapshot.scrollY);
+}
+
+async function parseCurrentLane(options = {}) {
+  const {
+    silent = false,
+    preserveUi = false,
+    preserveSelected = false,
+  } = options;
+  const lane = getLaneInput();
+
+  if (!lane.pickupZip && !lane.deliveryZip) {
+    if (!silent) {
+      setStatus("Enter at least one lane ZIP before scanning.");
+    }
+    return false;
+  }
+
+  if (!silent) {
+    setStatus("Parsing inbox emails for the active lane...");
+  }
+
+  const previousSignature = buildResultsSignature(state.results, state.hidden);
+  const uiSnapshot = preserveUi ? captureUiSnapshot() : null;
+  const selectedBefore = preserveSelected ? new Set(state.selectedIds) : null;
+  const response = await fetch("/api/parse-lane", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      lane,
+      messages: state.messages,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || "Lane parse failed");
+  }
+
+  const payload = await response.json();
+  const nextResults = payload.results || [];
+  const nextHidden = payload.hidden || [];
+  const nextSignature = buildResultsSignature(nextResults, nextHidden);
+  const changed = previousSignature !== nextSignature;
+
+  state.results = nextResults;
+  state.hidden = nextHidden;
+  if (changed) {
+    state.conversationThreads = {};
+  }
+  if (selectedBefore) {
+    state.selectedIds = new Set(
+      Array.from(selectedBefore).filter((id) => state.results.some((item) => item.id === id))
+    );
+  } else {
+    state.selectedIds.clear();
+  }
+  updateSummary();
+  if (!changed && silent) {
+    restoreUiSnapshot(uiSnapshot);
+    return false;
+  }
+
+  renderResults();
+  restoreUiSnapshot(uiSnapshot);
+
+  try {
+    await loadConversationThreads();
+    restoreUiSnapshot(uiSnapshot);
+  } catch (error) {
+    if (!silent) {
+      setStatus(`Loaded lane matches, but conversation threads failed: ${error.message}`);
+    }
+    return true;
+  }
+
+  if (!silent) {
+    setStatus(`Found ${state.results.length} relevant emails for this lane and hid ${state.hidden.length}.`);
+  }
+  return changed;
 }
 
 async function scanLane() {
@@ -442,35 +625,32 @@ async function scanLane() {
     await fetchInboxMessages();
   }
 
-  setStatus("Parsing inbox emails for the active lane...");
+  await parseCurrentLane();
+}
 
-  const response = await fetch("/api/parse-lane", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      lane,
-      messages: state.messages,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || "Lane parse failed");
+async function autoRefreshInbox() {
+  if (!state.account) {
+    return;
   }
 
-  const payload = await response.json();
-  state.results = payload.results || [];
-  state.hidden = payload.hidden || [];
-  state.conversationThreads = {};
-  state.selectedIds.clear();
-  renderResults();
-  updateSummary();
-  setStatus(`Found ${state.results.length} relevant emails for this lane and hid ${state.hidden.length}.`);
-  loadConversationThreads().catch((error) => {
-    setStatus(`Loaded lane matches, but conversation threads failed: ${error.message}`);
-  });
+  state.autoRefreshBusy = true;
+  try {
+    await fetchInboxMessages({ silent: true });
+
+    if (state.results.length && hasLaneInputs()) {
+      const changed = await parseCurrentLane({
+        silent: true,
+        preserveUi: true,
+        preserveSelected: true,
+      });
+
+      if (changed) {
+        setStatus(`Auto-refreshed ${state.messages.length} inbox emails.`);
+      }
+    }
+  } finally {
+    state.autoRefreshBusy = false;
+  }
 }
 
 function classificationClass(value) {
@@ -575,7 +755,6 @@ async function loadConversationThreads() {
   for (const conversationId of conversationIds) {
     try {
       nextThreads[conversationId] = await fetchConversationThread(conversationId);
-      renderResults();
       await sleep(150);
     } catch (error) {
       if (isMailboxThrottleError(error)) {
@@ -875,6 +1054,7 @@ async function initializeApp() {
 
   if (state.account) {
     setStatus(`Signed in as ${state.account.username}. Ready to scan the inbox.`);
+    startAutoRefresh();
   }
 
   updateActionState();
