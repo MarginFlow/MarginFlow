@@ -132,8 +132,29 @@ function normalizeThreadText(value) {
     .trim();
 }
 
-function truncateText(value, limit = 260) {
+function stripQuotedReplyText(value) {
   const normalized = normalizeThreadText(value);
+  if (!normalized) {
+    return "";
+  }
+
+  const cutoffPatterns = [
+    /\n_{5,}[\s\S]*$/i,
+    /\n-+\s*Original Message\s*-+[\s\S]*$/i,
+    /\nFrom:\s.*\nSent:\s.*\nTo:\s.*\nSubject:\s.*$/is,
+    /\nOn .*wrote:[\s\S]*$/i,
+  ];
+
+  let cleaned = normalized;
+  for (const pattern of cutoffPatterns) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+
+  return cleaned.trim();
+}
+
+function truncateText(value, limit = 260) {
+  const normalized = stripQuotedReplyText(value);
   if (!normalized) {
     return "No message body available.";
   }
@@ -728,7 +749,7 @@ async function refreshThreadForMessage(messageId) {
   try {
     const thread = await fetchConversationThread(result.conversationId);
     state.conversationThreads[result.conversationId] = thread;
-    renderResults();
+    updateConversationUiForItem(result);
   } catch (error) {
     if (isMailboxThrottleError(error)) {
       setStatus("Reply sent, but Outlook is rate-limiting thread refreshes right now. Try Refresh Inbox in a moment.");
@@ -753,30 +774,34 @@ async function loadConversationThreads() {
 
   const nextThreads = {};
   for (const conversationId of conversationIds) {
-    try {
-      nextThreads[conversationId] = await fetchConversationThread(conversationId);
-      await sleep(150);
-    } catch (error) {
-      if (isMailboxThrottleError(error)) {
-        state.conversationThreads = {
-          ...state.conversationThreads,
-          ...nextThreads,
-        };
-        renderResults();
-        throw new Error("Outlook is rate-limiting conversation history. Try Refresh Inbox in a moment.");
+      try {
+        nextThreads[conversationId] = await fetchConversationThread(conversationId);
+        await sleep(150);
+      } catch (error) {
+        if (isMailboxThrottleError(error)) {
+          state.conversationThreads = {
+            ...state.conversationThreads,
+            ...nextThreads,
+          };
+          updateConversationUi();
+          throw new Error("Outlook is rate-limiting conversation history. Try Refresh Inbox in a moment.");
+        }
+        throw error;
       }
-      throw error;
-    }
   }
 
   state.conversationThreads = {
     ...state.conversationThreads,
     ...nextThreads,
   };
-  renderResults();
+  updateConversationUi();
 }
 
 function renderThread(item) {
+  return `<div id="thread-container-${escapeHtml(item.id)}">${renderThreadMarkup(item)}</div>`;
+}
+
+function renderThreadMarkup(item) {
   const thread = (state.conversationThreads[item.conversationId] || []).filter((message) => message.id !== item.id);
   if (!thread.length) {
     return '<div class="thread-empty">Conversation replies will appear here.</div>';
@@ -810,21 +835,49 @@ function renderThread(item) {
   `;
 }
 
-function renderNegotiatedSection(item) {
+function renderNegotiatedSectionMarkup(item) {
   const negotiated = getNegotiatedDetails(item);
   if (!negotiated) {
     return "";
   }
 
   return `
-    <div class="negotiated-block">
-      <p class="rate-value ${negotiated.classification}">${escapeHtml(formatMoney(negotiated.negotiatedRate))}</p>
-      <p class="rate-label">Negotiated Rate</p>
-      <p class="margin-value ${negotiated.classification}">${
-        negotiated.marginPercent === null ? "New Margin N/A" : `New Margin ${escapeHtml(negotiated.marginPercent)}%`
-      }</p>
-    </div>
-  `;
+      <div class="economics-block negotiated-block">
+        <p class="rate-value ${negotiated.classification}">${escapeHtml(formatMoney(negotiated.negotiatedRate))}</p>
+        <p class="rate-label">Negotiated Rate</p>
+        <p class="margin-value ${negotiated.classification}">${
+          negotiated.marginPercent === null ? "New Margin N/A" : `New Margin ${escapeHtml(negotiated.marginPercent)}%`
+        }</p>
+      </div>
+    `;
+}
+
+function renderNegotiatedSection(item) {
+  return `<div id="negotiated-container-${escapeHtml(item.id)}">${renderNegotiatedSectionMarkup(item)}</div>`;
+}
+
+function updateConversationUiForItem(item) {
+  const economicsNode = getElement(`economics-grid-${item.id}`);
+  const hasNegotiated = Boolean(getNegotiatedDetails(item));
+  if (economicsNode) {
+    economicsNode.className = hasNegotiated ? "economics-grid has-negotiated" : "economics-grid";
+  }
+
+  const threadNode = getElement(`thread-container-${item.id}`);
+  if (threadNode) {
+    threadNode.innerHTML = renderThreadMarkup(item);
+  }
+
+  const negotiatedNode = getElement(`negotiated-container-${item.id}`);
+  if (negotiatedNode) {
+    negotiatedNode.innerHTML = renderNegotiatedSectionMarkup(item);
+  }
+}
+
+function updateConversationUi() {
+  state.results.forEach((item) => {
+    updateConversationUiForItem(item);
+  });
 }
 
 async function sendReply(messageId) {
@@ -949,15 +1002,17 @@ function renderResults() {
               <p class="subject">${escapeHtml(item.subject || "(No subject)")}</p>
               <p class="meta-line">${escapeHtml(item.fromAddress || "")}</p>
             </div>
-            <div>
-              <p class="rate-value ${classificationClass(item.classification)}">${escapeHtml(formatMoney(item.carrierRate))}</p>
-              <p class="rate-label">Quoted Rate</p>
-              <p class="margin-value ${classificationClass(item.classification)}">${
-                item.marginPercent === null ? "Margin N/A" : `Margin ${escapeHtml(item.marginPercent)}%`
-              }</p>
-              ${renderNegotiatedSection(item)}
+              <div id="economics-grid-${escapeHtml(item.id)}" class="economics-grid ${getNegotiatedDetails(item) ? "has-negotiated" : ""}">
+                <div class="economics-block">
+                  <p class="rate-value ${classificationClass(item.classification)}">${escapeHtml(formatMoney(item.carrierRate))}</p>
+                  <p class="rate-label">Quoted Rate</p>
+                  <p class="margin-value ${classificationClass(item.classification)}">${
+                    item.marginPercent === null ? "Margin N/A" : `Margin ${escapeHtml(item.marginPercent)}%`
+                  }</p>
+                </div>
+                ${renderNegotiatedSection(item)}
+              </div>
             </div>
-          </div>
           <div class="pill-row">
             <span class="pill">MC ${escapeHtml(item.mcNumber || "Unknown")}</span>
           </div>
