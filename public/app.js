@@ -39,6 +39,25 @@ function formatMoney(value) {
   return `$${value.toFixed(2)}`;
 }
 
+function formatDisplayTimestamp(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hours24 = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const meridiem = hours24 >= 12 ? "pm" : "am";
+  const hours12 = hours24 % 12 || 12;
+  return `${month}/${day} ${hours12}:${minutes}${meridiem}`;
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -804,7 +823,7 @@ function renderThread(item) {
 function renderThreadMarkup(item) {
   const thread = (state.conversationThreads[item.conversationId] || []).filter((message) => message.id !== item.id);
   if (!thread.length) {
-    return '<div class="thread-empty">Conversation replies will appear here.</div>';
+    return "";
   }
 
   return `
@@ -823,7 +842,7 @@ function renderThreadMarkup(item) {
               <article class="thread-item ${authorType}">
                 <div class="thread-head">
                   <span class="thread-author">${authorLabel}</span>
-                  <span class="thread-date">${escapeHtml(message.receivedDateTime || "")}</span>
+                  <span class="thread-date">${escapeHtml(formatDisplayTimestamp(message.receivedDateTime || ""))}</span>
                 </div>
                 <p class="thread-body">${escapeHtml(truncateText(message.bodyText || message.subject || ""))}</p>
               </article>
@@ -998,6 +1017,7 @@ function renderResults() {
               <div class="carrier-line">
                 <input class="selection" type="checkbox" data-select-id="${escapeHtml(item.id)}" />
                 <h3 class="carrier-name">${escapeHtml(item.carrierName)}</h3>
+                <span class="carrier-mc">MC: ${escapeHtml(item.mcNumber || "Unknown")}</span>
               </div>
               <p class="subject">${escapeHtml(item.subject || "(No subject)")}</p>
               <p class="meta-line">${escapeHtml(item.fromAddress || "")}</p>
@@ -1013,17 +1033,16 @@ function renderResults() {
                 ${renderNegotiatedSection(item)}
               </div>
             </div>
-          <div class="pill-row">
-            <span class="pill">MC ${escapeHtml(item.mcNumber || "Unknown")}</span>
-          </div>
-          <p class="preview">${escapeHtml(item.bodyPreview || "No preview available.")}</p>
-          <div class="pill-row">
+          <div class="pill-row detail-row">
             <a class="pill mono" href="${escapeHtml(item.webLink)}" target="_blank" rel="noreferrer">Open email</a>
-            <span class="pill mono">${escapeHtml(item.receivedDateTime || "")}</span>
+            <span class="pill mono">${escapeHtml(formatDisplayTimestamp(item.receivedDateTime || ""))}</span>
+          </div>
+          <div class="original-email-block">
+            <p class="preview">${escapeHtml(item.bodyPreview || "No preview available.")}</p>
           </div>
           ${renderThread(item)}
           <div class="reply-box">
-            <textarea id="reply-${escapeHtml(item.id)}" class="reply-input" placeholder="Type a new price or message. Example: 1800"></textarea>
+            <textarea id="reply-${escapeHtml(item.id)}" class="reply-input" placeholder="Conversation replies will appear here. If just a price is typed, it will come with an auto generated message."></textarea>
             <button class="primary-button send-button" type="button" data-send-id="${escapeHtml(item.id)}">Send Reply</button>
           </div>
           <p id="reply-status-${escapeHtml(item.id)}" class="reply-status"></p>
