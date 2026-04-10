@@ -426,6 +426,7 @@ button:disabled {
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 .selection {
@@ -437,6 +438,13 @@ button:disabled {
   margin: 0;
   font-size: 22px;
   letter-spacing: -0.01em;
+}
+
+.carrier-mc {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
 }
 
 .subject,
@@ -461,6 +469,10 @@ button:disabled {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 10px;
+}
+
+.detail-row {
+  margin-top: 12px;
 }
 
 .pill {
@@ -549,13 +561,31 @@ button:disabled {
   border-left: 1px solid rgba(29, 41, 57, 0.1);
 }
 
-.preview {
+.original-email-block {
   margin-top: 14px;
-  margin-bottom: 0;
-  padding: 13px 15px;
-  border-radius: 18px;
+  padding: 14px 16px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(17, 32, 49, 0.08);
   background: rgba(17, 32, 49, 0.04);
-  line-height: 1.55;
+}
+
+.original-email-title {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.preview {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  line-height: 1.6;
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .reply-box {
