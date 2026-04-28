@@ -200,6 +200,41 @@ h1 {
   margin-bottom: 24px;
 }
 
+.app-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 20px;
+  padding: 8px;
+  border: 1px solid rgba(17, 32, 49, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 16px 34px rgba(17, 32, 49, 0.05);
+}
+
+.app-tab {
+  min-width: 160px;
+  padding: 11px 18px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.app-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent) 0%, #15803d 100%);
+  box-shadow: 0 10px 24px rgba(22, 163, 74, 0.22);
+}
+
+.app-view {
+  display: none;
+}
+
+.app-view.active {
+  display: block;
+}
+
 .panel {
   padding: 24px;
   background:
@@ -368,6 +403,147 @@ button:disabled {
 .results-list {
   display: grid;
   gap: 18px;
+}
+
+.lane-history-panel {
+  min-height: 420px;
+}
+
+.lane-history-search {
+  max-width: 420px;
+  margin-bottom: 16px;
+}
+
+.lane-history-debug {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.lane-history-shell {
+  min-height: 320px;
+  padding: 18px;
+  border: 1px dashed rgba(17, 32, 49, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.lane-history-list {
+  display: grid;
+  gap: 16px;
+}
+
+.lane-history-card {
+  border: 1px solid rgba(17, 32, 49, 0.08);
+  border-radius: 22px;
+  padding: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(247, 251, 248, 0.94));
+  box-shadow: 0 14px 30px rgba(17, 32, 49, 0.05);
+}
+
+.lane-history-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.lane-history-carrier {
+  margin: 0 0 6px;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+.lane-history-meta {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.lane-history-rate-block {
+  min-width: 140px;
+}
+
+.lane-history-rate {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: right;
+  color: var(--accent-dark);
+}
+
+.lane-history-rate-label {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: right;
+}
+
+.lane-history-rate.green {
+  color: var(--green);
+}
+
+.lane-history-rate.yellow {
+  color: var(--yellow);
+}
+
+.lane-history-rate.red {
+  color: var(--red);
+}
+
+.lane-history-margin {
+  margin: 8px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.lane-history-profit {
+  margin: 8px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.lane-history-profit.green {
+  color: var(--green);
+}
+
+.lane-history-profit.yellow {
+  color: var(--yellow);
+}
+
+.lane-history-profit.red {
+  color: var(--red);
+}
+
+.lane-history-margin.green {
+  color: var(--green);
+}
+
+.lane-history-margin.yellow {
+  color: var(--yellow);
+}
+
+.lane-history-margin.red {
+  color: var(--red);
+}
+
+.lane-history-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+}
+
+.lane-history-details p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 .results-toolbar {
@@ -561,6 +737,22 @@ button:disabled {
   border-left: 1px solid rgba(29, 41, 57, 0.1);
 }
 
+.used-carrier-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.used-carrier-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
 .original-email-block {
   margin-top: 14px;
   padding: 14px 16px 16px;
@@ -590,10 +782,21 @@ button:disabled {
 
 .reply-box {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 180px;
   gap: 12px;
   margin-top: 16px;
   align-items: stretch;
+}
+
+.reply-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.reply-actions .send-button {
+  width: 100%;
 }
 
 .thread-panel {
@@ -706,6 +909,7 @@ button:disabled {
 @media (max-width: 920px) {
   .hero-layout,
   .grid.two-up,
+  .lane-history-shell,
   .form-grid,
   .metrics,
   .reply-box,
@@ -716,6 +920,14 @@ button:disabled {
 
   .result-top {
     flex-direction: column;
+  }
+
+  .lane-history-card-head {
+    flex-direction: column;
+  }
+
+  .lane-history-details {
+    grid-template-columns: 1fr;
   }
 
   .hero-actions {
@@ -740,5 +952,12 @@ button:disabled {
     padding-left: 0;
     border-left: 0;
     border-top: 1px solid rgba(29, 41, 57, 0.1);
+  }
+
+  .lane-history-rate,
+  .lane-history-rate-label,
+  .lane-history-profit,
+  .lane-history-margin {
+    text-align: left;
   }
 }

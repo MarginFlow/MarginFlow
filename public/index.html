@@ -48,94 +48,114 @@
         </div>
       </section>
 
-      <section class="grid two-up">
-        <article class="panel lane-panel">
-          <div class="panel-head">
-            <h2>Lane Filter</h2>
-            <span class="tag">Broker Input</span>
-          </div>
-          <div class="form-grid">
-            <label class="field">
-              <span>Pickup ZIP</span>
-              <input id="pickup-zip" type="text" inputmode="numeric" placeholder="00000" />
-            </label>
-            <label class="field">
-              <span>Dropoff ZIP</span>
-              <input id="delivery-zip" type="text" inputmode="numeric" placeholder="00000" />
-            </label>
-            <label class="field full">
-              <span>Shipper Rate ($)</span>
-              <input id="shipper-rate" type="number" min="0" step="0.01" placeholder="0" />
-            </label>
-          </div>
-          <div class="field">
-            <span>Mailbox Scan Size</span>
-            <select id="scan-limit">
-              <option value="25">Last 25 emails</option>
-              <option value="50" selected>Last 50 emails</option>
-              <option value="100">Last 100 emails</option>
-              <option value="250">Last 250 emails</option>
-            </select>
-          </div>
-          <button id="scan-lane-button" class="primary-button full-width" type="button" disabled>Scan This Lane</button>
-        </article>
+      <nav class="app-tabs" aria-label="Margin Flow sections">
+        <button id="tab-conversations" class="app-tab active" type="button" data-view="conversations" aria-pressed="true">Conversations</button>
+        <button id="tab-lane-history" class="app-tab" type="button" data-view="lane-history" aria-pressed="false">Lane History</button>
+      </nav>
 
-        <article class="panel snapshot-panel">
+      <section id="view-conversations" class="app-view active">
+        <section class="grid two-up">
+          <article class="panel lane-panel">
+            <div class="panel-head">
+              <h2>Lane Filter</h2>
+              <span class="tag">Broker Input</span>
+            </div>
+            <div class="form-grid">
+              <label class="field">
+                <span>Pickup ZIP</span>
+                <input id="pickup-zip" type="text" inputmode="numeric" placeholder="00000" />
+              </label>
+              <label class="field">
+                <span>Dropoff ZIP</span>
+                <input id="delivery-zip" type="text" inputmode="numeric" placeholder="00000" />
+              </label>
+              <label class="field full">
+                <span>Shipper Rate ($)</span>
+                <input id="shipper-rate" type="number" min="0" step="0.01" placeholder="0" />
+              </label>
+            </div>
+            <div class="field">
+              <span>Mailbox Scan Size</span>
+              <select id="scan-limit">
+                <option value="25">Last 25 emails</option>
+                <option value="50" selected>Last 50 emails</option>
+                <option value="100">Last 100 emails</option>
+                <option value="250">Last 250 emails</option>
+              </select>
+            </div>
+            <button id="scan-lane-button" class="primary-button full-width" type="button" disabled>Scan This Lane</button>
+          </article>
+
+          <article class="panel snapshot-panel">
+            <div class="panel-head">
+              <h2>Lane Snapshot</h2>
+              <span class="tag">Results</span>
+            </div>
+            <dl class="metrics">
+              <div>
+                <dt>Visible Matches</dt>
+                <dd id="visible-count">0</dd>
+              </div>
+              <div>
+                <dt>Hidden Emails</dt>
+                <dd id="hidden-count">0</dd>
+              </div>
+              <div>
+                <dt>Selected Carriers</dt>
+                <dd id="selected-count">0</dd>
+              </div>
+              <div>
+                <dt>Lowest Rate</dt>
+                <dd id="lowest-rate">-</dd>
+              </div>
+            </dl>
+            <p class="hint">
+              Hidden emails are emails that do not include the current lane requested for or matches at or below -50% margin when shipper rate is provided.
+            </p>
+          </article>
+        </section>
+
+        <section class="panel">
           <div class="panel-head">
-            <h2>Lane Snapshot</h2>
-            <span class="tag">Results</span>
+            <h2>Relevant Carrier Emails</h2>
+            <span class="tag">Checklist</span>
           </div>
-          <dl class="metrics">
-            <div>
-              <dt>Visible Matches</dt>
-              <dd id="visible-count">0</dd>
+          <div class="results-toolbar">
+            <div class="bulk-bar">
+              <label class="field bulk-field">
+                <span>Mass Reply To Selected Carriers</span>
+                <textarea id="bulk-reply-input" placeholder="Type a number like 1800 or write a full message once for all selected carriers."></textarea>
+              </label>
+              <button id="mass-reply-button" class="secondary-button" type="button">Mass Reply</button>
             </div>
-            <div>
-              <dt>Hidden Emails</dt>
-              <dd id="hidden-count">0</dd>
+            <div class="sort-row">
+              <label class="field sort-field">
+                <span>Sort</span>
+                <select id="sort-by">
+                  <option value="rate-asc" selected>Lowest Rate</option>
+                  <option value="rate-desc">Highest Rate</option>
+                  <option value="negotiated-asc">Lowest Negotiated Price</option>
+                </select>
+              </label>
             </div>
-            <div>
-              <dt>Selected Carriers</dt>
-              <dd id="selected-count">0</dd>
-            </div>
-            <div>
-              <dt>Lowest Rate</dt>
-              <dd id="lowest-rate">-</dd>
-            </div>
-          </dl>
-          <p class="hint">
-            Hidden emails are emails that do not include the current lane requested for or matches at or below -50% margin when shipper rate is provided.
-          </p>
-        </article>
+          </div>
+          <div id="results-list" class="results-list">
+            <p class="empty-state">Sign in and scan a lane to load matching carrier emails.</p>
+          </div>
+        </section>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Relevant Carrier Emails</h2>
-          <span class="tag">Checklist</span>
-        </div>
-        <div class="results-toolbar">
-          <div class="bulk-bar">
-            <label class="field bulk-field">
-              <span>Mass Reply To Selected Carriers</span>
-              <textarea id="bulk-reply-input" placeholder="Type a number like 1800 or write a full message once for all selected carriers."></textarea>
-            </label>
-            <button id="mass-reply-button" class="secondary-button" type="button">Mass Reply</button>
+      <section id="view-lane-history" class="app-view" aria-hidden="true">
+        <section class="panel lane-history-panel">
+          <div class="panel-head">
+            <h2>Lane History</h2>
           </div>
-          <div class="sort-row">
-            <label class="field sort-field">
-              <span>Sort</span>
-              <select id="sort-by">
-                <option value="rate-asc" selected>Lowest Rate</option>
-                <option value="rate-desc">Highest Rate</option>
-                <option value="negotiated-asc">Lowest Negotiated Price</option>
-              </select>
-            </label>
-          </div>
-        </div>
-        <div id="results-list" class="results-list">
-          <p class="empty-state">Sign in and scan a lane to load matching carrier emails.</p>
-        </div>
+          <label class="field lane-history-search">
+            <span>Search Saved Carriers</span>
+            <input id="lane-history-search" type="text" placeholder="Search by carrier name or MC number" />
+          </label>
+          <div id="lane-history-shell" class="lane-history-shell"></div>
+        </section>
       </section>
 
       <footer class="site-footer">
@@ -143,7 +163,7 @@
         <div>Product is still in its testing phase, use at your own risk.</div>
         <div>Built and coded with Codex from Open AI.</div>
         <div>www.linkedin.com/in/andrewzoblisein/</div>
-        <div>Version 1.1.8</div>
+        <div>Version 1.2.7</div>
       </footer>
     </main>
   </body>
