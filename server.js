@@ -4,6 +4,7 @@ const path = require("path");
 const { URL } = require("url");
 const { parseCarrierEmail, dedupeVisibleMessages } = require("./lib/lane-parser");
 const {
+  getMissingHistoryStoreConfigKeys,
   hasHistoryStoreConfig,
   listLaneHistory,
   saveLaneHistory,
@@ -41,11 +42,14 @@ function readRequestBody(req) {
 }
 
 function sendConfigError(res) {
+  const missing = getMissingHistoryStoreConfigKeys();
   send(
     res,
     503,
     JSON.stringify({
-      error: "Lane history storage is not configured. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.",
+      error: missing.length
+        ? `Lane history storage is not configured. Missing: ${missing.join(", ")}`
+        : "Lane history storage is not configured.",
     })
   );
 }

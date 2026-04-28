@@ -1,6 +1,7 @@
 "use strict";
 
 const {
+  getMissingHistoryStoreConfigKeys,
   hasHistoryStoreConfig,
   listLaneHistory,
   saveLaneHistory,
@@ -8,8 +9,11 @@ const {
 } = require("../lib/history-store");
 
 function sendConfigError(res) {
+  const missing = getMissingHistoryStoreConfigKeys();
   res.status(503).json({
-    error: "Lane history storage is not configured. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.",
+    error: missing.length
+      ? `Lane history storage is not configured. Missing: ${missing.join(", ")}`
+      : "Lane history storage is not configured.",
   });
 }
 
