@@ -738,21 +738,33 @@ async function toggleUsedCarrier(messageId, checked) {
       return;
     }
 
-    const payload = await apiFetch("/api/lane-history", {
-      method: "POST",
-      body: JSON.stringify({
-        userKey,
-        userEmail: getUserEmail(),
-        environment: getAppEnvironment(),
-        entry,
-      }),
-    });
-
-    state.laneHistory = Array.isArray(payload && payload.items) ? payload.items : [];
+    const previousHistory = [...state.laneHistory];
+    state.laneHistory = [
+      entry,
+      ...state.laneHistory.filter((historyEntry) => historyEntry.sourceConversationId !== entry.sourceConversationId),
+    ];
     state.laneHistoryError = "";
     renderLaneHistory();
     renderResults();
-    return;
+
+    try {
+      await apiFetch("/api/lane-history", {
+        method: "POST",
+        body: JSON.stringify({
+          userKey,
+          userEmail: getUserEmail(),
+          environment: getAppEnvironment(),
+          skipItems: true,
+          entry,
+        }),
+      });
+      return;
+    } catch (error) {
+      state.laneHistory = previousHistory;
+      renderLaneHistory();
+      renderResults();
+      throw error;
+    }
   }
 
   const conversationId = item.conversationId || item.id;
@@ -763,19 +775,15 @@ async function toggleUsedCarrier(messageId, checked) {
   renderResults();
 
   try {
-    const payload = await apiFetch("/api/lane-history", {
+    await apiFetch("/api/lane-history", {
       method: "DELETE",
       body: JSON.stringify({
         userKey,
         environment: getAppEnvironment(),
+        skipItems: true,
         sourceConversationId: conversationId,
       }),
     });
-
-    state.laneHistory = Array.isArray(payload && payload.items) ? payload.items : [];
-    state.laneHistoryError = "";
-    renderLaneHistory();
-    renderResults();
   } catch (error) {
     state.laneHistory = previousHistory;
     renderLaneHistory();

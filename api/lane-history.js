@@ -57,6 +57,7 @@ module.exports = async (req, res) => {
 
     if (req.method === "POST") {
       const entry = payload.entry || {};
+      const skipItems = Boolean(payload.skipItems);
       const shipperRate = parseMoneyValue(entry.shipperRate);
       const quotedRate = parseMoneyValue(entry.quotedRate);
       const negotiatedRate = parseMoneyValue(entry.negotiatedRate);
@@ -86,12 +87,18 @@ module.exports = async (req, res) => {
         sourceConversationId,
       });
 
+      if (skipItems) {
+        res.status(200).json({ ok: true });
+        return;
+      }
+
       const items = await listLaneHistory(userKey, environment);
       res.status(200).json({ items });
       return;
     }
 
     if (req.method === "DELETE") {
+      const skipItems = Boolean(payload.skipItems);
       const sourceConversationId = String(payload.sourceConversationId || "").trim();
       if (!sourceConversationId) {
         res.status(400).json({ error: "sourceConversationId is required" });
@@ -99,6 +106,12 @@ module.exports = async (req, res) => {
       }
 
       await deleteLaneHistory(userKey, environment, sourceConversationId);
+
+      if (skipItems) {
+        res.status(200).json({ ok: true });
+        return;
+      }
+
       const items = await listLaneHistory(userKey, environment);
       res.status(200).json({ items });
       return;

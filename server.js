@@ -166,6 +166,7 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === "POST") {
         const entry = payload.entry || {};
+        const skipItems = Boolean(payload.skipItems);
         const shipperRate = parseMoneyValue(entry.shipperRate);
         const quotedRate = parseMoneyValue(entry.quotedRate);
         const negotiatedRate = parseMoneyValue(entry.negotiatedRate);
@@ -195,6 +196,11 @@ const server = http.createServer(async (req, res) => {
           sourceConversationId,
         });
 
+        if (skipItems) {
+          send(res, 200, JSON.stringify({ ok: true }));
+          return;
+        }
+
         const items = await listLaneHistory(userKey, environment);
         send(
           res,
@@ -216,6 +222,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "DELETE") {
+        const skipItems = Boolean(payload.skipItems);
         const sourceConversationId = String(payload.sourceConversationId || "").trim();
         if (!sourceConversationId) {
           send(res, 400, JSON.stringify({ error: "sourceConversationId is required" }));
@@ -223,6 +230,12 @@ const server = http.createServer(async (req, res) => {
         }
 
         await deleteLaneHistory(userKey, environment, sourceConversationId);
+
+        if (skipItems) {
+          send(res, 200, JSON.stringify({ ok: true }));
+          return;
+        }
+
         const items = await listLaneHistory(userKey, environment);
         send(
           res,
