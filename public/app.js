@@ -10,8 +10,11 @@ const state = {
   hidden: [],
   selectedIds: new Set(),
   conversationThreads: {},
+  laneHistory: [],
+  laneHistoryError: "",
   lastSyncedAt: null,
   autoRefreshTimer: null,
+  activeView: "conversations",
 };
 
 function getElement(id) {
@@ -20,6 +23,55 @@ function getElement(id) {
 
 function setStatus(message) {
   getElement("status-text").textContent = message;
+}
+
+function getUserKey() {
+  if (!state.account) {
+    return "";
+  }
+
+  return state.account.homeAccountId || state.account.localAccountId || state.account.username || "";
+}
+
+function getUserEmail() {
+  return state.account && state.account.username ? state.account.username : "";
+}
+
+function renderActiveView() {
+  const tabs = Array.from(document.querySelectorAll("[data-view]"));
+  const conversationView = getElement("view-conversations");
+  const laneHistoryView = getElement("view-lane-history");
+
+  tabs.forEach((tab) => {
+    const isActive = tab.getAttribute("data-view") === state.activeView;
+    tab.classList.toggle("active", isActive);
+    tab.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+
+  if (conversationView) {
+    const isActive = state.activeView === "conversations";
+    conversationView.classList.toggle("active", isActive);
+    conversationView.setAttribute("aria-hidden", isActive ? "false" : "true");
+  }
+
+  if (laneHistoryView) {
+    const isActive = state.activeView === "lane-history";
+    laneHistoryView.classList.toggle("active", isActive);
+    laneHistoryView.setAttribute("aria-hidden", isActive ? "false" : "true");
+  }
+}
+
+function setActiveView(nextView) {
+  state.activeView = nextView === "lane-history" ? "lane-history" : "conversations";
+  renderActiveView();
+  renderLaneHistory();
+
+  if (state.activeView === "lane-history" && state.account) {
+    loadLaneHistory({ silent: true }).catch((error) => {
+      state.laneHistoryError = error.message || "Lane history is unavailable right now.";
+      renderLaneHistory();
+    });
+  }
 }
 
 function normalizeMoney(value) {
@@ -69,6 +121,11 @@ function escapeHtml(value) {
 
 function getConfig() {
   return window.FIREFLY_CONFIG || {};
+}
+
+function getAppEnvironment() {
+  const configured = String(getConfig().appEnvironment || "").trim().toLowerCase();
+  return configured || "production";
 }
 
 function hasUsableConfig() {
@@ -142,6 +199,132 @@ function updateSummary() {
     .filter((value) => Number.isFinite(value))
     .sort((left, right) => left - right)[0];
   getElement("lowest-rate").textContent = Number.isFinite(lowestRate) ? formatMoney(lowestRate) : "-";
+}
+
+function isCarrierUsed(item) {
+  const conversationId = item && item.conversationId ? item.conversationId : "";
+  if (!conversationId) {
+    return false;
+  }
+
+  return state.laneHistory.some((entry) => entry.sourceConversationId === conversationId);
+}
+
+function renderLaneHistory() {
+  const container = getElement("lane-history-shell") || document.querySelector(".lane-history-shell");
+  if (!container) {
+    return;
+  }
+
+  if (!state.account) {
+    container.innerHTML = '<p class="empty-state">Sign in with Microsoft to load saved lane history.</p>';
+    return;
+  }
+
+  if (state.laneHistoryError) {
+    container.innerHTML = `<p class="empty-state">${escapeHtml(state.laneHistoryError)}</p>`;
+    return;
+  }
+
+  if (!state.laneHistory.length) {
+    container.innerHTML = '<p class="empty-state">No saved carrier history yet.</p>';
+    return;
+  }
+
+  const lane = getLaneInput();
+  const pickupFilter = String(lane.pickupZip || "").trim();
+  const deliveryFilter = String(lane.deliveryZip || "").trim();
+  const searchTerm = String((getElement("lane-history-search") && getElement("lane-history-search").value) || "").trim().toLowerCase();
+
+  const filteredItems = state.laneHistory.filter((entry) => {
+    const pickupMatches = !pickupFilter || String(entry.pickupZip || "").trim() === pickupFilter;
+    const deliveryMatches = !deliveryFilter || String(entry.deliveryZip || "").trim() === deliveryFilter;
+    const carrierName = String(entry.carrierName || "").toLowerCase();
+    const mcNumber = String(entry.mcNumber || "").toLowerCase();
+    const searchMatches = !searchTerm || carrierName.includes(searchTerm) || mcNumber.includes(searchTerm);
+    return pickupMatches && deliveryMatches && searchMatches;
+  });
+
+  if (!filteredItems.length) {
+    const filters = [];
+    const laneLabel = [pickupFilter, deliveryFilter].filter(Boolean).join(" to ");
+    if (laneLabel) {
+      filters.push(laneLabel);
+    }
+    if (searchTerm) {
+      filters.push(`search "${searchTerm}"`);
+    }
+    container.innerHTML = `<p class="empty-state">${
+      filters.length
+        ? `No saved carrier history for ${escapeHtml(filters.join(" and "))} yet.`
+        : "No saved carrier history yet."
+    }</p>`;
+    return;
+  }
+
+  const items = [...filteredItems].sort((left, right) => {
+    const leftTime = left && left.savedAt ? Date.parse(left.savedAt) : 0;
+    const rightTime = right && right.savedAt ? Date.parse(right.savedAt) : 0;
+    return rightTime - leftTime;
+  });
+
+  container.innerHTML = "";
+
+  const list = document.createElement("div");
+  list.className = "lane-history-list";
+
+  const summary = document.createElement("p");
+  summary.className = "lane-history-meta";
+  if (pickupFilter || deliveryFilter || searchTerm) {
+    const summaryParts = [];
+    if (pickupFilter || deliveryFilter) {
+      summaryParts.push([pickupFilter || "any pickup", deliveryFilter || "any dropoff"].join(" to "));
+    }
+    if (searchTerm) {
+      summaryParts.push(`search "${searchTerm}"`);
+    }
+    summary.textContent = `Showing ${items.length} saved carrier record${items.length === 1 ? "" : "s"} for ${summaryParts.join(" and ")}.`;
+  } else {
+    summary.textContent = `Showing ${items.length} saved carrier record${items.length === 1 ? "" : "s"}.`;
+  }
+  container.appendChild(summary);
+
+  items.forEach((entry) => {
+    const finalRate = Number(entry.finalRate);
+    const shipperRate = Number(entry.shipperRate);
+    const profitAmount = computeProfitFromRates(shipperRate, finalRate);
+    const marginPercent = computeMarginPercentFromRates(shipperRate, finalRate);
+    const marginClass = getMarginClassification(marginPercent);
+    const article = document.createElement("article");
+    article.className = "lane-history-card";
+    article.innerHTML = `
+      <div class="lane-history-card-head">
+        <div>
+          <h3 class="lane-history-carrier">${escapeHtml(entry.carrierName || "Unknown carrier")}</h3>
+          <p class="lane-history-meta">${escapeHtml(entry.carrierEmail || "")}</p>
+        </div>
+        <div class="lane-history-rate-block">
+          <p class="lane-history-rate ${marginClass}">${escapeHtml(formatMoney(finalRate))}</p>
+          <p class="lane-history-rate-label">Final Rate</p>
+          <p class="lane-history-profit ${marginClass}">${
+            profitAmount === null ? "Profit N/A" : `Profit ${escapeHtml(formatMoney(profitAmount))}`
+          }</p>
+          <p class="lane-history-margin ${marginClass}">${
+            marginPercent === null ? "Margin N/A" : `Margin ${escapeHtml(marginPercent)}%`
+          }</p>
+        </div>
+      </div>
+      <div class="lane-history-details">
+        <p><strong>Phone:</strong> ${escapeHtml(entry.carrierPhone || "Unknown")}</p>
+        <p><strong>MC:</strong> ${escapeHtml(entry.mcNumber || "Unknown")}</p>
+        <p><strong>Lane:</strong> ${escapeHtml(entry.pickupZip || "-----")} to ${escapeHtml(entry.deliveryZip || "-----")}</p>
+        <p><strong>Saved:</strong> ${escapeHtml(formatDisplayTimestamp(entry.savedAt || ""))}</p>
+      </div>
+    `;
+    list.appendChild(article);
+  });
+
+  container.appendChild(list);
 }
 
 function normalizeThreadText(value) {
@@ -253,10 +436,21 @@ function extractRateCandidates(text) {
 
 function computeMarginPercent(rate) {
   const shipperRate = normalizeMoney(getElement("shipper-rate").value);
+  return computeMarginPercentFromRates(shipperRate, rate);
+}
+
+function computeMarginPercentFromRates(shipperRate, rate) {
   if (!Number.isFinite(shipperRate) || shipperRate <= 0 || !Number.isFinite(rate)) {
     return null;
   }
   return Math.round((((shipperRate - rate) / shipperRate) * 100) * 100) / 100;
+}
+
+function computeProfitFromRates(shipperRate, rate) {
+  if (!Number.isFinite(shipperRate) || !Number.isFinite(rate)) {
+    return null;
+  }
+  return Math.round((shipperRate - rate) * 100) / 100;
 }
 
 function buildResultsSignature(results, hidden) {
@@ -424,6 +618,170 @@ async function graphFetch(path, options = {}) {
   }
 
   return JSON.parse(text);
+}
+
+async function apiFetch(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  const text = await response.text();
+  const serverErrorMatch = text.match(/"error"\s*:\s*"([^"]+)"/);
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      payload = { error: serverErrorMatch ? serverErrorMatch[1] : text };
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      (payload && payload.error) ||
+      (serverErrorMatch && serverErrorMatch[1]) ||
+      `Request failed with ${response.status}: ${text || "No response body"}`;
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
+async function loadLaneHistory(options = {}) {
+  const { silent = false } = options;
+  const userKey = getUserKey();
+  if (!userKey) {
+    state.laneHistory = [];
+    state.laneHistoryError = "";
+    renderLaneHistory();
+    return;
+  }
+
+  try {
+    const environment = getAppEnvironment();
+    const payload = await apiFetch(`/api/lane-history?userKey=${encodeURIComponent(userKey)}&environment=${encodeURIComponent(environment)}`);
+    state.laneHistory = Array.isArray(payload && payload.items) ? payload.items : [];
+    state.laneHistoryError = "";
+    renderLaneHistory();
+
+    if (!silent) {
+      const debugText = payload && payload.debug
+        ? ` userKey=${payload.debug.userKey} count=${payload.debug.count}`
+        : "";
+      setStatus(`Loaded ${state.laneHistory.length} saved lane history records.${debugText}`);
+    }
+  } catch (error) {
+    state.laneHistory = [];
+    state.laneHistoryError = error.message || "Lane history is unavailable right now.";
+    renderLaneHistory();
+    if (!silent) {
+      setStatus(`Lane history unavailable: ${state.laneHistoryError}`);
+    }
+  }
+}
+
+function buildLaneHistoryEntry(item) {
+  const lane = getLaneInput();
+  const negotiated = getNegotiatedDetails(item);
+  const finalRate = negotiated && Number.isFinite(negotiated.negotiatedRate)
+    ? negotiated.negotiatedRate
+    : item.carrierRate;
+
+  if (!Number.isFinite(finalRate)) {
+    return null;
+  }
+
+  const userKey = getUserKey();
+  const conversationId = item.conversationId || item.id;
+
+  return {
+    id: `${getAppEnvironment()}::${userKey}::${conversationId}`,
+    environment: getAppEnvironment(),
+    carrierName: item.carrierName || "Unknown carrier",
+    carrierEmail: item.fromAddress || "",
+    carrierPhone: item.carrierPhone || "",
+    mcNumber: item.mcNumber || "",
+    pickupZip: lane.pickupZip || "",
+    deliveryZip: lane.deliveryZip || "",
+    shipperRate: Number.isFinite(lane.shipperRate) ? lane.shipperRate : null,
+    quotedRate: Number.isFinite(item.carrierRate) ? item.carrierRate : null,
+    negotiatedRate: negotiated && Number.isFinite(negotiated.negotiatedRate) ? negotiated.negotiatedRate : null,
+    finalRate,
+    savedAt: new Date().toISOString(),
+    sourceMessageId: item.id,
+    sourceConversationId: conversationId,
+  };
+}
+
+async function toggleUsedCarrier(messageId, checked) {
+  const item = findResultById(messageId);
+  if (!item) {
+    return;
+  }
+
+  const userKey = getUserKey();
+  if (!userKey) {
+    setStatus("Sign in before saving lane history.");
+    renderResults();
+    return;
+  }
+
+  if (checked) {
+    const entry = buildLaneHistoryEntry(item);
+    if (!entry) {
+      setStatus("A valid carrier rate is required before saving this carrier to lane history.");
+      renderResults();
+      return;
+    }
+
+    const payload = await apiFetch("/api/lane-history", {
+      method: "POST",
+      body: JSON.stringify({
+        userKey,
+        userEmail: getUserEmail(),
+        environment: getAppEnvironment(),
+        entry,
+      }),
+    });
+
+    state.laneHistory = Array.isArray(payload && payload.items) ? payload.items : [];
+    state.laneHistoryError = "";
+    renderLaneHistory();
+    renderResults();
+    return;
+  }
+
+  const conversationId = item.conversationId || item.id;
+  const previousHistory = [...state.laneHistory];
+  state.laneHistory = state.laneHistory.filter((entry) => entry.sourceConversationId !== conversationId);
+  state.laneHistoryError = "";
+  renderLaneHistory();
+  renderResults();
+
+  try {
+    const payload = await apiFetch("/api/lane-history", {
+      method: "DELETE",
+      body: JSON.stringify({
+        userKey,
+        environment: getAppEnvironment(),
+        sourceConversationId: conversationId,
+      }),
+    });
+
+    state.laneHistory = Array.isArray(payload && payload.items) ? payload.items : [];
+    state.laneHistoryError = "";
+    renderLaneHistory();
+    renderResults();
+  } catch (error) {
+    state.laneHistory = previousHistory;
+    renderLaneHistory();
+    renderResults();
+    throw error;
+  }
 }
 
 async function signIn() {
@@ -698,6 +1056,19 @@ function classificationClass(value) {
     return "green";
   }
   if (value === "YELLOW") {
+    return "yellow";
+  }
+  return "red";
+}
+
+function getMarginClassification(marginPercent) {
+  if (!Number.isFinite(marginPercent)) {
+    return "red";
+  }
+  if (marginPercent >= 15) {
+    return "green";
+  }
+  if (marginPercent >= 5) {
     return "yellow";
   }
   return "red";
@@ -1043,7 +1414,13 @@ function renderResults() {
           ${renderThread(item)}
           <div class="reply-box">
             <textarea id="reply-${escapeHtml(item.id)}" class="reply-input" placeholder="Conversation replies will appear here. If just a price is typed, it will come with an auto generated message."></textarea>
-            <button class="primary-button send-button" type="button" data-send-id="${escapeHtml(item.id)}">Send Reply</button>
+            <div class="reply-actions">
+              <button class="primary-button send-button" type="button" data-send-id="${escapeHtml(item.id)}">Send Reply</button>
+              <label class="used-carrier-toggle">
+                <input class="used-carrier-checkbox" type="checkbox" data-used-carrier-id="${escapeHtml(item.id)}" ${isCarrierUsed(item) ? "checked" : ""} />
+                <span>Carrier used</span>
+              </label>
+            </div>
           </div>
           <p id="reply-status-${escapeHtml(item.id)}" class="reply-status"></p>
         </article>
@@ -1060,6 +1437,17 @@ function renderResults() {
   container.querySelectorAll("[data-send-id]").forEach((node) => {
     node.addEventListener("click", () => {
       sendReply(node.getAttribute("data-send-id"));
+    });
+  });
+
+  container.querySelectorAll("[data-used-carrier-id]").forEach((node) => {
+    node.addEventListener("change", async (event) => {
+      try {
+        await toggleUsedCarrier(node.getAttribute("data-used-carrier-id"), event.target.checked);
+      } catch (error) {
+        setStatus(`Lane history update failed: ${error.message}`);
+        renderResults();
+      }
     });
   });
 
@@ -1085,8 +1473,28 @@ function wireUi() {
   });
 
   ["pickup-zip", "delivery-zip", "shipper-rate"].forEach((id) => {
-    getElement(id).addEventListener("input", updateActionState);
+    getElement(id).addEventListener("input", () => {
+      updateActionState();
+      if (state.activeView === "lane-history") {
+        renderLaneHistory();
+      }
+    });
   });
+
+  document.querySelectorAll("[data-view]").forEach((node) => {
+    node.addEventListener("click", () => {
+      setActiveView(node.getAttribute("data-view"));
+    });
+  });
+
+  const laneHistorySearch = getElement("lane-history-search");
+  if (laneHistorySearch) {
+    laneHistorySearch.addEventListener("input", () => {
+      if (state.activeView === "lane-history") {
+        renderLaneHistory();
+      }
+    });
+  }
 }
 
 async function initializeApp() {
@@ -1129,13 +1537,16 @@ async function initializeApp() {
   if (state.account) {
     setStatus(`Signed in as ${state.account.username}. Ready to scan the inbox.`);
     startAutoRefresh();
+    await loadLaneHistory({ silent: true });
   }
 
   updateActionState();
   updateSyncText();
   updateSummary();
   renderResults();
+  renderLaneHistory();
   wireUi();
+  renderActiveView();
 }
 
 document.addEventListener("DOMContentLoaded", () => {

@@ -2,6 +2,13 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { URL } = require("url");
+const { parseCarrierEmail, dedupeVisibleMessages } = require("./lib/lane-parser");
+const {
+  hasHistoryStoreConfig,
+  listLaneHistory,
+  saveLaneHistory,
+  deleteLaneHistory,
+} = require("./lib/history-store");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -33,240 +40,23 @@ function readRequestBody(req) {
   });
 }
 
-function normalizeZip(value) {
-  if (value === null || value === undefined) {
-    return "";
-  }
-
-  const digits = String(value).match(/\d/g);
-  return digits ? digits.join("").slice(0, 5) : "";
+function sendConfigError(res) {
+  send(
+    res,
+    503,
+    JSON.stringify({
+      error: "Lane history storage is not configured. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.",
+    })
+  );
 }
 
-function normalizeMoney(value) {
+function parseMoneyValue(value) {
   if (value === null || value === undefined || value === "") {
     return null;
   }
 
   const parsed = Number(String(value).replace(/,/g, "").replace(/\$/g, "").trim());
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function roundTo(value, digits) {
-  if (!Number.isFinite(value)) {
-    return null;
-  }
-
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
-}
-
-function extractMcNumber(text) {
-  const match = String(text || "").match(/\bMC\s*#?\s*-?\s*(\d{4,8})\b/i);
-  return match ? match[1] : null;
-}
-
-function extractRateCandidates(text) {
-  const candidates = [];
-  const source = String(text || "");
-  const patterns = [
-    {
-      type: "per_mile",
-      regex: /(?:rate|can|do|cover|all in|offer|quote|my rate)?\s*[:=-]?\s*\$?\s*((?:\d{1,3}(?:,\d{3})+)|(?:\d{1,6}))(?:\.(\d{1,3}))?\s*(?:\/\s*(?:mi|mile)|per\s*mile|rpm)\b/gi,
-      baseScore: 10,
-    },
-    {
-      type: "total",
-      regex: /(?:rate(?: is)?|my rate(?: is)?|can do|can|cover|all in|offer|quote|for|flat|do)\s*[:=-]?\s*\$?\s*((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
-      baseScore: 12,
-    },
-    {
-      type: "total",
-      regex: /\$\s*((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
-      baseScore: 7,
-    },
-    {
-      type: "total",
-      regex: /\b((?:\d{1,3}(?:,\d{3})+)|(?:\d{2,6}))(?:\.(\d{1,2}))?\b/gi,
-      baseScore: 2,
-    },
-  ];
-
-  patterns.forEach((pattern) => {
-    let match;
-    while ((match = pattern.regex.exec(source)) !== null) {
-      const wholePart = match[1] || "";
-      const decimalPart = match[2] ? `.${match[2]}` : "";
-      const value = normalizeMoney(`${wholePart}${decimalPart}`);
-      const matchedText = match[0] || "";
-      const matchStart = match.index;
-      const matchEnd = match.index + matchedText.length;
-      const prevChar = matchStart > 0 ? source[matchStart - 1] : "";
-      const nextChar = matchEnd < source.length ? source[matchEnd] : "";
-      if (!Number.isFinite(value) || value <= 1) {
-        continue;
-      }
-      if (prevChar === "," || nextChar === ",") {
-        continue;
-      }
-
-      const context = source
-        .slice(Math.max(0, match.index - 36), Math.min(source.length, pattern.regex.lastIndex + 36))
-        .toLowerCase();
-
-      let score = pattern.baseScore;
-      if (/\brate\b|\bcan\b|\bdo\b|\bcover\b|\ball in\b|\bquote\b|\boffer\b/.test(context)) {
-        score += 4;
-      }
-      if (/\bmc\b|\bdot\b|\bphone\b|\bref\b|\bzip\b/.test(context)) {
-        score -= 6;
-      }
-      if (/\bpickup\b|\bdeliver\b|\bdrop\b/.test(context)) {
-        score -= 3;
-      }
-      if (value >= 100 && value <= 4000) {
-        score += 2;
-      }
-      if (value < 100 && pattern.type === "total") {
-        score -= 5;
-      }
-      if (value > 10000) {
-        score -= 10;
-      }
-
-      candidates.push({
-        type: pattern.type,
-        value,
-        score,
-        index: match.index,
-      });
-    }
-  });
-
-  return candidates.sort((left, right) => {
-    if (right.score !== left.score) {
-      return right.score - left.score;
-    }
-    return right.index - left.index;
-  });
-}
-
-function detectLaneMatch(text, pickupZip, deliveryZip) {
-  const source = String(text || "").toLowerCase();
-  const pickup = normalizeZip(pickupZip);
-  const delivery = normalizeZip(deliveryZip);
-  const pickupMatch = pickup ? source.includes(pickup) : false;
-  const deliveryMatch = delivery ? source.includes(delivery) : false;
-
-  if (pickup && delivery) {
-    return pickupMatch || deliveryMatch
-      ? pickupMatch && deliveryMatch
-      : false;
-  }
-
-  if (pickup) {
-    return pickupMatch;
-  }
-
-  if (delivery) {
-    return deliveryMatch;
-  }
-
-  return false;
-}
-
-function classifyMargin(marginPercent) {
-  if (!Number.isFinite(marginPercent)) {
-    return "UNKNOWN";
-  }
-  if (marginPercent >= 15) {
-    return "GREEN";
-  }
-  if (marginPercent >= 5) {
-    return "YELLOW";
-  }
-  return "RED";
-}
-
-function parseCarrierEmail(message, lane) {
-  const shipperRate = normalizeMoney(lane.shipperRate);
-  const pickupZip = normalizeZip(lane.pickupZip);
-  const deliveryZip = normalizeZip(lane.deliveryZip);
-  const body = message.bodyText || "";
-  const haystack = [
-    message.subject || "",
-    message.fromName || "",
-    message.fromAddress || "",
-    body,
-  ].join("\n");
-
-  const laneMatch = detectLaneMatch(haystack, pickupZip, deliveryZip);
-  const rateCandidates = extractRateCandidates(haystack);
-  const bestRate = rateCandidates[0] || null;
-  const carrierRate = bestRate ? roundTo(bestRate.value, 2) : null;
-  const marginPercent =
-    Number.isFinite(shipperRate) && shipperRate > 0 && Number.isFinite(carrierRate)
-      ? roundTo(((shipperRate - carrierRate) / shipperRate) * 100, 2)
-      : null;
-  const ignored = !laneMatch || (Number.isFinite(marginPercent) && marginPercent <= -50);
-
-  return {
-    id: message.id,
-    conversationId: message.conversationId || "",
-    webLink: message.webLink || "",
-    subject: message.subject || "",
-    receivedDateTime: message.receivedDateTime || "",
-    fromName: message.fromName || "",
-    fromAddress: message.fromAddress || "",
-    carrierName: message.fromName || message.fromAddress || "Unknown carrier",
-    mcNumber: extractMcNumber(haystack),
-    carrierRate,
-    marginPercent,
-    classification: classifyMargin(marginPercent),
-    laneMatch,
-    ignored,
-    ignoreReason: !laneMatch
-      ? "Wrong lane"
-      : Number.isFinite(marginPercent) && marginPercent <= -50
-        ? "Margin <= -50%"
-        : null,
-    bodyPreview: body.slice(0, 280),
-  };
-}
-
-function compareReceivedDate(left, right) {
-  const leftTime = left && left.receivedDateTime ? Date.parse(left.receivedDateTime) : 0;
-  const rightTime = right && right.receivedDateTime ? Date.parse(right.receivedDateTime) : 0;
-  return leftTime - rightTime;
-}
-
-function pickRepresentativeMessage(existing, candidate) {
-  if (!existing) {
-    return candidate;
-  }
-
-  const existingScore = Number.isFinite(existing.carrierRate) ? existing.carrierRate : Number.POSITIVE_INFINITY;
-  const candidateScore = Number.isFinite(candidate.carrierRate) ? candidate.carrierRate : Number.POSITIVE_INFINITY;
-
-  if (compareReceivedDate(candidate, existing) < 0) {
-    return candidate;
-  }
-
-  if (compareReceivedDate(candidate, existing) === 0 && candidateScore < existingScore) {
-    return candidate;
-  }
-
-  return existing;
-}
-
-function dedupeVisibleMessages(items) {
-  const byConversation = new Map();
-
-  items.forEach((item) => {
-    const key = item.conversationId || item.id;
-    byConversation.set(key, pickRepresentativeMessage(byConversation.get(key), item));
-  });
-
-  return Array.from(byConversation.values());
 }
 
 function serveStatic(req, res) {
@@ -290,6 +80,8 @@ function serveStatic(req, res) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const requestUrl = new URL(req.url, `http://${req.headers.host}`);
+
   if (req.method === "GET" && req.url === "/vendor/msal-browser.min.js") {
     fs.readFile(MSAL_BUNDLE, (error, buffer) => {
       if (error) {
@@ -335,6 +127,113 @@ const server = http.createServer(async (req, res) => {
       );
     } catch (error) {
       send(res, 500, JSON.stringify({ error: error.message || "Parse failed" }));
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/lane-history") {
+    if (!hasHistoryStoreConfig()) {
+      sendConfigError(res);
+      return;
+    }
+
+    try {
+        if (req.method === "GET") {
+          const userKey = String(requestUrl.searchParams.get("userKey") || "").trim();
+          const environment = String(requestUrl.searchParams.get("environment") || "production").trim() || "production";
+          if (!userKey) {
+            send(res, 400, JSON.stringify({ error: "userKey is required" }));
+            return;
+          }
+
+          const items = await listLaneHistory(userKey, environment);
+          send(res, 200, JSON.stringify({ items, debug: { action: "list", userKey, environment, count: items.length } }));
+          return;
+        }
+
+      const rawBody = await readRequestBody(req);
+      const payload = rawBody ? JSON.parse(rawBody) : {};
+      const userKey = String(payload.userKey || payload.userEmail || "local-margin-flow-user").trim();
+      const environment = String(payload.environment || "production").trim() || "production";
+      if (!userKey) {
+        send(res, 400, JSON.stringify({ error: "userKey is required" }));
+        return;
+      }
+
+      if (req.method === "POST") {
+        const entry = payload.entry || {};
+        const shipperRate = parseMoneyValue(entry.shipperRate);
+        const quotedRate = parseMoneyValue(entry.quotedRate);
+        const negotiatedRate = parseMoneyValue(entry.negotiatedRate);
+        const finalRate = parseMoneyValue(entry.finalRate);
+        const fallbackFinalRate = finalRate ?? negotiatedRate ?? quotedRate ?? 0;
+        const sourceConversationId = String(entry.sourceConversationId || entry.sourceMessageId || Date.now());
+        const sourceMessageId = entry.sourceMessageId ? String(entry.sourceMessageId) : sourceConversationId;
+        const entryId = String(entry.id || `${userKey}::${sourceConversationId}`);
+
+        await saveLaneHistory({
+          id: entryId,
+          userKey,
+          userEmail: String(payload.userEmail || ""),
+          environment,
+          carrierName: String(entry.carrierName || "Unknown carrier"),
+          carrierEmail: String(entry.carrierEmail || ""),
+          carrierPhone: entry.carrierPhone ? String(entry.carrierPhone) : null,
+          mcNumber: entry.mcNumber ? String(entry.mcNumber) : null,
+          pickupZip: entry.pickupZip ? String(entry.pickupZip) : null,
+          deliveryZip: entry.deliveryZip ? String(entry.deliveryZip) : null,
+          shipperRate,
+          quotedRate,
+          negotiatedRate,
+          finalRate: fallbackFinalRate,
+          savedAt: String(entry.savedAt || new Date().toISOString()),
+          sourceMessageId,
+          sourceConversationId,
+        });
+
+        const items = await listLaneHistory(userKey, environment);
+        send(
+          res,
+          200,
+          JSON.stringify({
+            items,
+            debug: {
+              action: "save",
+              userKey,
+              environment,
+              count: items.length,
+              sourceConversationId,
+              sourceMessageId,
+              entryId,
+            },
+          })
+        );
+        return;
+      }
+
+      if (req.method === "DELETE") {
+        const sourceConversationId = String(payload.sourceConversationId || "").trim();
+        if (!sourceConversationId) {
+          send(res, 400, JSON.stringify({ error: "sourceConversationId is required" }));
+          return;
+        }
+
+        await deleteLaneHistory(userKey, environment, sourceConversationId);
+        const items = await listLaneHistory(userKey, environment);
+        send(
+          res,
+          200,
+          JSON.stringify({
+            items,
+            debug: { action: "delete", userKey, environment, count: items.length, sourceConversationId },
+          })
+        );
+        return;
+      }
+
+      send(res, 405, JSON.stringify({ error: "Method not allowed" }));
+    } catch (error) {
+      send(res, 500, JSON.stringify({ error: error.message || "Lane history request failed" }));
     }
     return;
   }
