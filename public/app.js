@@ -41,6 +41,7 @@ function renderActiveView() {
   const tabs = Array.from(document.querySelectorAll("[data-view]"));
   const conversationView = getElement("view-conversations");
   const laneHistoryView = getElement("view-lane-history");
+  const changeLogView = getElement("view-change-log");
 
   tabs.forEach((tab) => {
     const isActive = tab.getAttribute("data-view") === state.activeView;
@@ -59,10 +60,22 @@ function renderActiveView() {
     laneHistoryView.classList.toggle("active", isActive);
     laneHistoryView.setAttribute("aria-hidden", isActive ? "false" : "true");
   }
+
+  if (changeLogView) {
+    const isActive = state.activeView === "change-log";
+    changeLogView.classList.toggle("active", isActive);
+    changeLogView.setAttribute("aria-hidden", isActive ? "false" : "true");
+  }
 }
 
 function setActiveView(nextView) {
-  state.activeView = nextView === "lane-history" ? "lane-history" : "conversations";
+  if (nextView === "lane-history") {
+    state.activeView = "lane-history";
+  } else if (nextView === "change-log") {
+    state.activeView = "change-log";
+  } else {
+    state.activeView = "conversations";
+  }
   renderActiveView();
   renderLaneHistory();
 
@@ -203,11 +216,16 @@ function updateSummary() {
 
 function isCarrierUsed(item) {
   const conversationId = item && item.conversationId ? item.conversationId : "";
-  if (!conversationId) {
+  const messageId = item && item.id ? item.id : "";
+  if (!conversationId && !messageId) {
     return false;
   }
 
-  return state.laneHistory.some((entry) => entry.sourceConversationId === conversationId);
+  return state.laneHistory.some((entry) => {
+    const entryConversationId = entry && entry.sourceConversationId ? entry.sourceConversationId : "";
+    const entryMessageId = entry && entry.sourceMessageId ? entry.sourceMessageId : "";
+    return (conversationId && entryConversationId === conversationId) || (messageId && entryMessageId === messageId);
+  });
 }
 
 function renderLaneHistory() {
@@ -329,7 +347,17 @@ function renderLaneHistory() {
 
 function normalizeThreadText(value) {
   return String(value || "")
+    .replace(/<mailto:[^>]+>/gi, "")
+    .replace(/<\/?(div|p|br|li|ul|ol|blockquote|span)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
     .replace(/\r\n/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -343,14 +371,33 @@ function stripQuotedReplyText(value) {
   const cutoffPatterns = [
     /\n_{5,}[\s\S]*$/i,
     /\n-+\s*Original Message\s*-+[\s\S]*$/i,
+    /\nBegin forwarded message:[\s\S]*$/i,
     /\nFrom:\s.*\nSent:\s.*\nTo:\s.*\nSubject:\s.*$/is,
-    /\nOn .*wrote:[\s\S]*$/i,
+    /\nOn\s.+?wrote:\s*[\s\S]*$/i,
+    /\bOn\s.+?wrote:\s*[\s\S]*$/i,
+    /\nFrom:\s.*$/is,
   ];
 
   let cleaned = normalized;
   for (const pattern of cutoffPatterns) {
     cleaned = cleaned.replace(pattern, "");
   }
+
+  const inlineCutMarkers = [
+    /\bOn\s(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s.+?wrote:\s*[\s\S]*$/i,
+    /\bFrom:\s.+?@.+$/i,
+    /_{5,}[\s\S]*$/i,
+  ];
+
+  for (const pattern of inlineCutMarkers) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+
+  cleaned = cleaned
+    .replace(/\n_{5,}[\s\S]*$/i, "")
+    .replace(/\n-{2,}[\s\S]*$/i, "")
+    .replace(/\s{3,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n");
 
   return cleaned.trim();
 }
@@ -651,22 +698,34 @@ async function apiFetch(path, options = {}) {
   return payload;
 }
 
+async function authorizedApiFetch(path, options = {}) {
+  const token = await getAccessToken();
+  return apiFetch(path, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 async function loadLaneHistory(options = {}) {
   const { silent = false } = options;
-  const userKey = getUserKey();
-  if (!userKey) {
+  if (!state.account) {
     state.laneHistory = [];
     state.laneHistoryError = "";
     renderLaneHistory();
+    renderResults();
     return;
   }
 
   try {
     const environment = getAppEnvironment();
-    const payload = await apiFetch(`/api/lane-history?userKey=${encodeURIComponent(userKey)}&environment=${encodeURIComponent(environment)}`);
+    const payload = await authorizedApiFetch(`/api/lane-history?environment=${encodeURIComponent(environment)}`);
     state.laneHistory = Array.isArray(payload && payload.items) ? payload.items : [];
     state.laneHistoryError = "";
     renderLaneHistory();
+    renderResults();
 
     if (!silent) {
       const debugText = payload && payload.debug
@@ -678,6 +737,7 @@ async function loadLaneHistory(options = {}) {
     state.laneHistory = [];
     state.laneHistoryError = error.message || "Lane history is unavailable right now.";
     renderLaneHistory();
+    renderResults();
     if (!silent) {
       setStatus(`Lane history unavailable: ${state.laneHistoryError}`);
     }
@@ -695,11 +755,10 @@ function buildLaneHistoryEntry(item) {
     return null;
   }
 
-  const userKey = getUserKey();
   const conversationId = item.conversationId || item.id;
 
   return {
-    id: `${getAppEnvironment()}::${userKey}::${conversationId}`,
+    id: `${getAppEnvironment()}::${conversationId}`,
     environment: getAppEnvironment(),
     carrierName: item.carrierName || "Unknown carrier",
     carrierEmail: item.fromAddress || "",
@@ -723,8 +782,7 @@ async function toggleUsedCarrier(messageId, checked) {
     return;
   }
 
-  const userKey = getUserKey();
-  if (!userKey) {
+  if (!state.account) {
     setStatus("Sign in before saving lane history.");
     renderResults();
     return;
@@ -738,11 +796,9 @@ async function toggleUsedCarrier(messageId, checked) {
       return;
     }
 
-    const payload = await apiFetch("/api/lane-history", {
+    const payload = await authorizedApiFetch("/api/lane-history", {
       method: "POST",
       body: JSON.stringify({
-        userKey,
-        userEmail: getUserEmail(),
         environment: getAppEnvironment(),
         entry,
       }),
@@ -763,10 +819,9 @@ async function toggleUsedCarrier(messageId, checked) {
   renderResults();
 
   try {
-    const payload = await apiFetch("/api/lane-history", {
+    const payload = await authorizedApiFetch("/api/lane-history", {
       method: "DELETE",
       body: JSON.stringify({
-        userKey,
         environment: getAppEnvironment(),
         sourceConversationId: conversationId,
       }),
@@ -1409,7 +1464,7 @@ function renderResults() {
             <span class="pill mono">${escapeHtml(formatDisplayTimestamp(item.receivedDateTime || ""))}</span>
           </div>
           <div class="original-email-block">
-            <p class="preview">${escapeHtml(item.bodyPreview || "No preview available.")}</p>
+            <p class="preview">${escapeHtml(truncateText(item.bodyText || item.bodyPreview || "", 420))}</p>
           </div>
           ${renderThread(item)}
           <div class="reply-box">
@@ -1515,7 +1570,7 @@ async function initializeApp() {
       redirectUri: config.redirectUri || window.location.origin,
     },
     cache: {
-      cacheLocation: "localStorage",
+      cacheLocation: "sessionStorage",
       storeAuthStateInCookie: true,
     },
   });

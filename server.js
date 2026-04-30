@@ -2,6 +2,18 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { URL } = require("url");
+const { getBearerToken, resolveMicrosoftUser } = require("./lib/auth");
+const {
+  MAX_JSON_BODY_BYTES,
+  assertBodyWithinLimit,
+  buildSecurityHeaders,
+  checkRateLimit,
+  getClientAddress,
+  assertAllowedOrigin,
+  toPublicErrorMessage,
+  sanitizeLaneHistoryEntry,
+  validateParseLanePayload,
+} = require("./lib/security");
 const { parseCarrierEmail, dedupeVisibleMessages } = require("./lib/lane-parser");
 const {
   hasHistoryStoreConfig,
@@ -25,16 +37,25 @@ const CONTENT_TYPES = {
 
 function send(res, statusCode, body, contentType = "application/json; charset=utf-8") {
   res.writeHead(statusCode, {
+    ...buildSecurityHeaders(),
     "Content-Type": contentType,
-    "Cache-Control": "no-store",
   });
   res.end(body);
 }
 
-function readRequestBody(req) {
+function readRequestBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = [];
+    let totalBytes = 0;
     req.on("data", (chunk) => chunks.push(chunk));
+    req.on("data", (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        const error = new Error(`Request body too large. Limit is ${maxBytes} bytes.`);
+        error.statusCode = 413;
+        req.destroy(error);
+      }
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
@@ -45,18 +66,50 @@ function sendConfigError(res) {
     res,
     503,
     JSON.stringify({
-      error: "Lane history storage is not configured. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.",
+      error: toPublicErrorMessage(
+        "Lane history storage is not configured. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.",
+        "Lane history storage is not configured."
+      ),
     })
   );
 }
 
-function parseMoneyValue(value) {
-  if (value === null || value === undefined || value === "") {
+async function resolveAuthenticatedUser(req, res) {
+  const accessToken = getBearerToken(req.headers);
+  if (!accessToken) {
+    send(res, 401, JSON.stringify({ error: "Microsoft sign-in token is required." }));
     return null;
   }
 
-  const parsed = Number(String(value).replace(/,/g, "").replace(/\$/g, "").trim());
-  return Number.isFinite(parsed) ? parsed : null;
+  try {
+    return await resolveMicrosoftUser(accessToken);
+  } catch (error) {
+    send(
+      res,
+      error.statusCode || 401,
+      JSON.stringify({
+        error: error.statusCode >= 500 ? "Microsoft authentication failed." : (error.message || "Microsoft authentication failed."),
+      })
+    );
+    return null;
+  }
+}
+
+function enforceRateLimit(req, res, scope, limit, windowMs) {
+  const clientAddress = getClientAddress(req.headers, req.socket && req.socket.remoteAddress);
+  const result = checkRateLimit({
+    key: `${scope}::${clientAddress}`,
+    limit,
+    windowMs,
+  });
+
+  if (result.allowed) {
+    return true;
+  }
+
+  res.setHeader("Retry-After", String(result.retryAfterSeconds));
+  send(res, 429, JSON.stringify({ error: "Too many requests. Please try again shortly." }));
+  return false;
 }
 
 function serveStatic(req, res) {
@@ -95,10 +148,15 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "POST" && req.url === "/api/parse-lane") {
     try {
+      assertAllowedOrigin(req.headers, req.headers.host);
+      if (!enforceRateLimit(req, res, "parse-lane", 45, 60 * 1000)) {
+        return;
+      }
+
       const rawBody = await readRequestBody(req);
-      const payload = JSON.parse(rawBody);
-      const messages = Array.isArray(payload.messages) ? payload.messages : [];
-      const lane = payload.lane || {};
+      assertBodyWithinLimit(req.headers, rawBody);
+      const payload = rawBody ? JSON.parse(rawBody) : {};
+      const { messages, lane } = validateParseLanePayload(payload);
 
       const parsed = messages.map((message) => parseCarrierEmail(message, lane));
       const visible = dedupeVisibleMessages(
@@ -126,7 +184,14 @@ const server = http.createServer(async (req, res) => {
         })
       );
     } catch (error) {
-      send(res, 500, JSON.stringify({ error: error.message || "Parse failed" }));
+      const statusCode = error.statusCode || 500;
+      send(
+        res,
+        statusCode,
+        JSON.stringify({
+          error: statusCode >= 500 ? "Lane parsing failed." : (error.message || "Lane parsing failed."),
+        })
+      );
     }
     return;
   }
@@ -138,13 +203,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
+        assertAllowedOrigin(req.headers, req.headers.host);
+        if (!enforceRateLimit(req, res, "lane-history", 90, 60 * 1000)) {
+          return;
+        }
+
+        const authenticatedUser = await resolveAuthenticatedUser(req, res);
+        if (!authenticatedUser) {
+          return;
+        }
+
         if (req.method === "GET") {
-          const userKey = String(requestUrl.searchParams.get("userKey") || "").trim();
+          const userKey = authenticatedUser.userKey;
           const environment = String(requestUrl.searchParams.get("environment") || "production").trim() || "production";
-          if (!userKey) {
-            send(res, 400, JSON.stringify({ error: "userKey is required" }));
-            return;
-          }
 
           const items = await listLaneHistory(userKey, environment);
           send(res, 200, JSON.stringify({ items, debug: { action: "list", userKey, environment, count: items.length } }));
@@ -152,43 +223,33 @@ const server = http.createServer(async (req, res) => {
         }
 
       const rawBody = await readRequestBody(req);
+      assertBodyWithinLimit(req.headers, rawBody);
       const payload = rawBody ? JSON.parse(rawBody) : {};
-      const userKey = String(payload.userKey || payload.userEmail || "local-margin-flow-user").trim();
+      const userKey = authenticatedUser.userKey;
+      const userEmail = authenticatedUser.userEmail;
       const environment = String(payload.environment || "production").trim() || "production";
-      if (!userKey) {
-        send(res, 400, JSON.stringify({ error: "userKey is required" }));
-        return;
-      }
 
       if (req.method === "POST") {
-        const entry = payload.entry || {};
-        const shipperRate = parseMoneyValue(entry.shipperRate);
-        const quotedRate = parseMoneyValue(entry.quotedRate);
-        const negotiatedRate = parseMoneyValue(entry.negotiatedRate);
-        const finalRate = parseMoneyValue(entry.finalRate);
-        const fallbackFinalRate = finalRate ?? negotiatedRate ?? quotedRate ?? 0;
-        const sourceConversationId = String(entry.sourceConversationId || entry.sourceMessageId || Date.now());
-        const sourceMessageId = entry.sourceMessageId ? String(entry.sourceMessageId) : sourceConversationId;
-        const entryId = String(entry.id || `${userKey}::${sourceConversationId}`);
+        const entry = sanitizeLaneHistoryEntry(payload.entry || {}, userKey, environment);
 
         await saveLaneHistory({
-          id: entryId,
+          id: entry.id,
           userKey,
-          userEmail: String(payload.userEmail || ""),
+          userEmail,
           environment,
-          carrierName: String(entry.carrierName || "Unknown carrier"),
-          carrierEmail: String(entry.carrierEmail || ""),
-          carrierPhone: entry.carrierPhone ? String(entry.carrierPhone) : null,
-          mcNumber: entry.mcNumber ? String(entry.mcNumber) : null,
-          pickupZip: entry.pickupZip ? String(entry.pickupZip) : null,
-          deliveryZip: entry.deliveryZip ? String(entry.deliveryZip) : null,
-          shipperRate,
-          quotedRate,
-          negotiatedRate,
-          finalRate: fallbackFinalRate,
-          savedAt: String(entry.savedAt || new Date().toISOString()),
-          sourceMessageId,
-          sourceConversationId,
+          carrierName: entry.carrierName,
+          carrierEmail: entry.carrierEmail,
+          carrierPhone: entry.carrierPhone,
+          mcNumber: entry.mcNumber,
+          pickupZip: entry.pickupZip,
+          deliveryZip: entry.deliveryZip,
+          shipperRate: entry.shipperRate,
+          quotedRate: entry.quotedRate,
+          negotiatedRate: entry.negotiatedRate,
+          finalRate: entry.finalRate,
+          savedAt: entry.savedAt,
+          sourceMessageId: entry.sourceMessageId,
+          sourceConversationId: entry.sourceConversationId,
         });
 
         const items = await listLaneHistory(userKey, environment);
@@ -202,9 +263,9 @@ const server = http.createServer(async (req, res) => {
               userKey,
               environment,
               count: items.length,
-              sourceConversationId,
-              sourceMessageId,
-              entryId,
+              sourceConversationId: entry.sourceConversationId,
+              sourceMessageId: entry.sourceMessageId,
+              entryId: entry.id,
             },
           })
         );
@@ -233,7 +294,17 @@ const server = http.createServer(async (req, res) => {
 
       send(res, 405, JSON.stringify({ error: "Method not allowed" }));
     } catch (error) {
-      send(res, 500, JSON.stringify({ error: error.message || "Lane history request failed" }));
+      const statusCode = error.statusCode || 500;
+      send(
+        res,
+        statusCode,
+        JSON.stringify({
+          error:
+            statusCode >= 500
+              ? "Lane history request failed."
+              : (error.message || "Lane history request failed."),
+        })
+      );
     }
     return;
   }
