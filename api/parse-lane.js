@@ -1,17 +1,58 @@
 "use strict";
 
+const {
+  MAX_JSON_BODY_BYTES,
+  assertBodyWithinLimit,
+  buildSecurityHeaders,
+  checkRateLimit,
+  getClientAddress,
+  assertAllowedOrigin,
+  validateParseLanePayload,
+} = require("../lib/security");
 const { parseCarrierEmail, dedupeVisibleMessages } = require("../lib/lane-parser");
 
+function applySecurityHeaders(res) {
+  const headers = buildSecurityHeaders();
+  Object.entries(headers).forEach(([key, value]) => {
+    res.setHeader(key, value);
+  });
+}
+
+function enforceRateLimit(req, res, scope, limit, windowMs) {
+  const clientAddress = getClientAddress(req.headers, req.socket && req.socket.remoteAddress);
+  const result = checkRateLimit({
+    key: `${scope}::${clientAddress}`,
+    limit,
+    windowMs,
+  });
+
+  if (result.allowed) {
+    return true;
+  }
+
+  res.setHeader("Retry-After", String(result.retryAfterSeconds));
+  res.status(429).json({ error: "Too many requests. Please try again shortly." });
+  return false;
+}
+
 module.exports = async (req, res) => {
+  applySecurityHeaders(res);
+
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
     return;
   }
 
   try {
+    assertAllowedOrigin(req.headers, req.headers.host);
+    if (!enforceRateLimit(req, res, "parse-lane", 45, 60 * 1000)) {
+      return;
+    }
+
+    const rawBody = typeof req.body === "string" ? req.body : "";
+    assertBodyWithinLimit(req.headers, rawBody, MAX_JSON_BODY_BYTES);
     const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
-    const messages = Array.isArray(payload.messages) ? payload.messages : [];
-    const lane = payload.lane || {};
+    const { messages, lane } = validateParseLanePayload(payload);
 
     const parsed = messages.map((message) => parseCarrierEmail(message, lane));
     const visible = dedupeVisibleMessages(
@@ -34,6 +75,9 @@ module.exports = async (req, res) => {
       hidden: parsed.filter((item) => item.ignored),
     });
   } catch (error) {
-    res.status(500).json({ error: error.message || "Parse failed" });
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({
+      error: statusCode >= 500 ? "Lane parsing failed." : (error.message || "Lane parsing failed."),
+    });
   }
 };

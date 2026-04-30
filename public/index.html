@@ -51,6 +51,7 @@
       <nav class="app-tabs" aria-label="Margin Flow sections">
         <button id="tab-conversations" class="app-tab active" type="button" data-view="conversations" aria-pressed="true">Conversations</button>
         <button id="tab-lane-history" class="app-tab" type="button" data-view="lane-history" aria-pressed="false">Lane History</button>
+        <button id="tab-change-log" class="app-tab" type="button" data-view="change-log" aria-pressed="false">Change Log</button>
       </nav>
 
       <section id="view-conversations" class="app-view active">
@@ -158,12 +159,104 @@
         </section>
       </section>
 
+      <section id="view-change-log" class="app-view" aria-hidden="true">
+        <section class="panel change-log-panel">
+          <div class="panel-head">
+            <h2>What's New</h2>
+          </div>
+          <div class="change-log-shell">
+            <article class="change-log-card">
+              <div class="change-log-head">
+                <h3>Version 1.4.5</h3>
+                <p class="change-log-date">April 30, 2026</p>
+              </div>
+              <ul class="change-log-list">
+                <li>Added a new Change Log tab so users can quickly review what has changed between versions.</li>
+                <li>Improved how saved carrier history reconnects with the conversation workflow after refreshes and rescans.</li>
+                <li>Cleaned up carrier message previews so reply clutter and forwarded-email noise are reduced throughout the conversation view.</li>
+                <li>Improved how saved conversation history is matched and carried across the app for a more consistent broker experience.</li>
+                <li>Strengthened account verification for saved user data and improved protection around backend requests.</li>
+                <li>Added additional safeguards around request handling, saved data validation, and browser security policies.</li>
+                <li>Reduced exposure of sensitive browser session data and made production error handling reveal less internal detail.</li>
+              </ul>
+            </article>
+
+            <article class="change-log-card">
+              <div class="change-log-head">
+                <h3>Version 1.2.7</h3>
+                <p class="change-log-date">April 29, 2026</p>
+              </div>
+              <ul class="change-log-list">
+                <li>Added lane history search by carrier name.</li>
+                <li>Added lane history search by MC number.</li>
+                <li>Improved saved-lane review flow for brokers working larger histories.</li>
+                <li>Added saved profit display between final rate and margin.</li>
+                <li>Added saved margin percentage under the final rate.</li>
+                <li>Matched saved margin colors to the conversation view.</li>
+              </ul>
+            </article>
+
+            <article class="change-log-card">
+              <div class="change-log-head">
+                <h3>Version 1.2</h3>
+                <p class="change-log-date">April 28, 2026</p>
+              </div>
+              <ul class="change-log-list">
+                <li>Added the Lane History tab.</li>
+                <li>Added the Carrier used action to save a carrier after a lane is covered.</li>
+                <li>Saved carrier name, email, phone, MC, lane, date, and final agreed rate.</li>
+                <li>Made lane history persistent with Microsoft user association and Turso storage.</li>
+                <li>Allowed unchecking Carrier used to remove the saved record.</li>
+                <li>Saved the shipper rate with the record so margin can be calculated later.</li>
+                <li>Added internal separation between production, beta, and dev history records.</li>
+              </ul>
+            </article>
+
+            <article class="change-log-card">
+              <div class="change-log-head">
+                <h3>Version 1.1</h3>
+                <p class="change-log-date">April 10, 2026</p>
+              </div>
+              <ul class="change-log-list">
+                <li>Moved MC information into the carrier header for a cleaner card layout.</li>
+                <li>Strengthened the original email presentation and reduced visual clutter.</li>
+                <li>Cleaned up placeholders and reply guidance in the conversation area.</li>
+                <li>Improved timestamp formatting for broker readability.</li>
+                <li>Added version tracking in the footer and tightened the footer messaging.</li>
+                <li>Improved quoted versus negotiated rate layout inside carrier cards.</li>
+                <li>Restored cleaner thread bubbles beneath the original carrier email.</li>
+                <li>Removed repeated quoted-history clutter from reply bubbles.</li>
+              </ul>
+            </article>
+
+            <article class="change-log-card">
+              <div class="change-log-head">
+                <h3>Version 1.0.4</h3>
+                <p class="change-log-date">April 8, 2026</p>
+              </div>
+              <ul class="change-log-list">
+                <li>Added background auto-refresh for inbox activity.</li>
+                <li>Reduced full-screen flashing when new replies arrive.</li>
+                <li>Improved thread refresh behavior during live carrier conversations.</li>
+                <li>Refreshed the product layout with a stronger hero section and cleaner panels.</li>
+                <li>Added a connection and last-synced trust strip.</li>
+                <li>Improved conversation card styling and overall visual hierarchy.</li>
+                <li>Connected Microsoft inbox scanning to lane-based filtering.</li>
+                <li>Extracted carrier rates, MC numbers, and lane matches from inbox replies.</li>
+                <li>Added margin calculation, sorting, mass reply, and individual reply workflows.</li>
+                <li>Built in-app conversation threads so brokers can stay inside the site while negotiating.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+      </section>
+
       <footer class="site-footer">
         <div>Contact fireflytest8888@outlook.com if you encounter a bug or have a suggestion to be added.</div>
         <div>Product is still in its testing phase, use at your own risk.</div>
         <div>Built and coded with Codex from Open AI.</div>
         <div>www.linkedin.com/in/andrewzoblisein/</div>
-        <div>Version 1.2.7</div>
+        <div>Version 1.4.5</div>
       </footer>
     </main>
   </body>
