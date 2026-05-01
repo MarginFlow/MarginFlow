@@ -1476,7 +1476,7 @@ function renderResults() {
           </div>
           ${renderThread(item)}
           <div class="reply-box">
-            <textarea id="reply-${escapeHtml(item.id)}" class="reply-input" placeholder="Conversation replies will appear here. If just a price is typed, it will come with an auto generated message."></textarea>
+            <textarea id="reply-${escapeHtml(item.id)}" class="reply-input" placeholder="Conversation replies will appear here. If just a price is typed, it will come with an auto-generated message."></textarea>
             <div class="reply-actions">
               <button class="primary-button send-button" type="button" data-send-id="${escapeHtml(item.id)}">Send Reply</button>
               <label class="used-carrier-toggle">
