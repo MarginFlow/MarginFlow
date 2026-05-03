@@ -17,6 +17,8 @@ const state = {
   activeView: "conversations",
 };
 
+const DEFAULT_SUPPORT_EMAIL = "fireflytest8888@outlook.com";
+
 function getElement(id) {
   return document.getElementById(id);
 }
@@ -41,6 +43,7 @@ function renderActiveView() {
   const tabs = Array.from(document.querySelectorAll("[data-view]"));
   const conversationView = getElement("view-conversations");
   const laneHistoryView = getElement("view-lane-history");
+  const contactView = getElement("view-contact");
   const changeLogView = getElement("view-change-log");
 
   tabs.forEach((tab) => {
@@ -61,6 +64,12 @@ function renderActiveView() {
     laneHistoryView.setAttribute("aria-hidden", isActive ? "false" : "true");
   }
 
+  if (contactView) {
+    const isActive = state.activeView === "contact";
+    contactView.classList.toggle("active", isActive);
+    contactView.setAttribute("aria-hidden", isActive ? "false" : "true");
+  }
+
   if (changeLogView) {
     const isActive = state.activeView === "change-log";
     changeLogView.classList.toggle("active", isActive);
@@ -71,6 +80,8 @@ function renderActiveView() {
 function setActiveView(nextView) {
   if (nextView === "lane-history") {
     state.activeView = "lane-history";
+  } else if (nextView === "contact") {
+    state.activeView = "contact";
   } else if (nextView === "change-log") {
     state.activeView = "change-log";
   } else {
@@ -84,6 +95,10 @@ function setActiveView(nextView) {
       state.laneHistoryError = error.message || "Lane history is unavailable right now.";
       renderLaneHistory();
     });
+  }
+
+  if (state.activeView === "contact") {
+    hydrateContactForm();
   }
 }
 
@@ -136,6 +151,21 @@ function getConfig() {
   return window.FIREFLY_CONFIG || {};
 }
 
+function getSupportEmail() {
+  const configured = String(getConfig().supportEmail || "").trim();
+  return configured || DEFAULT_SUPPORT_EMAIL;
+}
+
+function getCurrentVersion() {
+  const footer = document.querySelector(".site-footer");
+  if (!footer) {
+    return "Unknown";
+  }
+
+  const match = footer.textContent.match(/Version\s+([0-9.]+)/i);
+  return match ? match[1] : "Unknown";
+}
+
 function getAppEnvironment() {
   const configured = String(getConfig().appEnvironment || "").trim().toLowerCase();
   return configured || "production";
@@ -156,10 +186,32 @@ function updateActionState() {
   getElement("refresh-button").disabled = !signedIn;
   getElement("scan-lane-button").disabled = !(signedIn && hasLaneInputs());
   getElement("sign-out-button").disabled = !signedIn;
+  const contactSendButton = getElement("contact-send-button");
+  if (contactSendButton) {
+    contactSendButton.disabled = !signedIn;
+  }
   const connectionBadge = getElement("connection-badge");
   if (connectionBadge) {
     connectionBadge.textContent = signedIn ? "Microsoft inbox connected" : "Microsoft inbox not connected";
     connectionBadge.className = signedIn ? "trust-pill connected" : "trust-pill";
+  }
+}
+
+function hydrateContactForm() {
+  const versionField = getElement("contact-version");
+  const nameField = getElement("contact-name");
+  const statusField = getElement("contact-status");
+
+  if (versionField) {
+    versionField.value = getCurrentVersion();
+  }
+
+  if (nameField && state.account && !nameField.value.trim()) {
+    nameField.value = state.account.name || state.account.username || "";
+  }
+
+  if (statusField) {
+    statusField.textContent = state.account ? "" : "Sign in with Microsoft to send a message.";
   }
 }
 
@@ -665,6 +717,96 @@ async function graphFetch(path, options = {}) {
   }
 
   return JSON.parse(text);
+}
+
+async function sendContactMessage() {
+  const nameField = getElement("contact-name");
+  const categoryField = getElement("contact-category");
+  const versionField = getElement("contact-version");
+  const messageField = getElement("contact-message");
+  const statusField = getElement("contact-status");
+
+  if (!state.account) {
+    setStatus("Sign in with Microsoft before sending a contact message.");
+    if (statusField) {
+      statusField.textContent = "Sign in with Microsoft before sending a message.";
+    }
+    return;
+  }
+
+  const name = String(nameField && nameField.value || "").trim();
+  const category = String(categoryField && categoryField.value || "Other").trim();
+  const version = String(versionField && versionField.value || getCurrentVersion()).trim();
+  const message = String(messageField && messageField.value || "").trim();
+
+  if (!name) {
+    setStatus("Add your name before sending the contact message.");
+    if (statusField) {
+      statusField.textContent = "Add your name before sending.";
+    }
+    return;
+  }
+
+  if (!message) {
+    setStatus("Add a message before sending the contact message.");
+    if (statusField) {
+      statusField.textContent = "Add a message before sending.";
+    }
+    return;
+  }
+
+  const subject = `[${category}] Margin Flow v${version} - ${name}`;
+  const body = [
+    `Category: ${category}`,
+    `Name: ${name}`,
+    `Signed-in Email: ${getUserEmail() || "Unknown"}`,
+    `Version: ${version}`,
+    `Environment: ${getAppEnvironment()}`,
+    "",
+    "Message:",
+    message,
+  ].join("\n");
+
+  try {
+    setStatus("Sending contact message through Microsoft Graph...");
+    if (statusField) {
+      statusField.textContent = "Sending message...";
+    }
+
+    await graphFetch("/me/sendMail", {
+      method: "POST",
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: {
+            contentType: "Text",
+            content: body,
+          },
+          toRecipients: [
+            {
+              emailAddress: {
+                address: getSupportEmail(),
+              },
+            },
+          ],
+        },
+        saveToSentItems: true,
+      }),
+    });
+
+    if (messageField) {
+      messageField.value = "";
+    }
+    if (statusField) {
+      statusField.textContent = "Message sent.";
+    }
+    setStatus("Contact message sent.");
+  } catch (error) {
+    if (statusField) {
+      statusField.textContent = `Send failed: ${error.message}`;
+    }
+    setStatus(`Contact message failed: ${error.message}`);
+  }
 }
 
 async function apiFetch(path, options = {}) {
@@ -1534,6 +1676,18 @@ function wireUi() {
       setStatus(`Lane scan failed: ${error.message}`);
     }
   });
+  const contactSendButton = getElement("contact-send-button");
+  if (contactSendButton) {
+    contactSendButton.addEventListener("click", () => {
+      sendContactMessage().catch((error) => {
+        const statusField = getElement("contact-status");
+        if (statusField) {
+          statusField.textContent = `Send failed: ${error.message}`;
+        }
+        setStatus(`Contact message failed: ${error.message}`);
+      });
+    });
+  }
 
   ["pickup-zip", "delivery-zip", "shipper-rate"].forEach((id) => {
     getElement(id).addEventListener("input", () => {
@@ -1609,6 +1763,7 @@ async function initializeApp() {
   renderResults();
   renderLaneHistory();
   wireUi();
+  hydrateContactForm();
   renderActiveView();
 }
 
