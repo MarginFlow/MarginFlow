@@ -20,8 +20,7 @@
         <div class="hero-layout">
           <div class="hero-copy-block">
             <img class="hero-logo" src="./assets/logos/margin-flow-logo-3.svg" alt="Margin Flow" />
-            <p class="eyebrow">Lane inbox triage for freight brokers</p>
-            <h1>Streamline your carrier negotiatons with one click.</h1>
+            <h1>Streamline your carrier negotiations with one click.</h1>
             <p class="hero-copy">
               Connect a Microsoft inbox, filter by lane, and turn scattered carrier replies
               into a clean board of rates, MC numbers, margins, and live email threads.
@@ -51,6 +50,7 @@
       <nav class="app-tabs" aria-label="Margin Flow sections">
         <button id="tab-conversations" class="app-tab active" type="button" data-view="conversations" aria-pressed="true">Conversations</button>
         <button id="tab-lane-history" class="app-tab" type="button" data-view="lane-history" aria-pressed="false">Lane History</button>
+        <button id="tab-contact" class="app-tab" type="button" data-view="contact" aria-pressed="false">Contact</button>
         <button id="tab-change-log" class="app-tab" type="button" data-view="change-log" aria-pressed="false">Change Log</button>
       </nav>
 
@@ -59,7 +59,6 @@
           <article class="panel lane-panel">
             <div class="panel-head">
               <h2>Lane Filter</h2>
-              <span class="tag">Broker Input</span>
             </div>
             <div class="form-grid">
               <label class="field">
@@ -90,7 +89,6 @@
           <article class="panel snapshot-panel">
             <div class="panel-head">
               <h2>Lane Snapshot</h2>
-              <span class="tag">Results</span>
             </div>
             <dl class="metrics">
               <div>
@@ -119,7 +117,6 @@
         <section class="panel">
           <div class="panel-head">
             <h2>Relevant Carrier Emails</h2>
-            <span class="tag">Checklist</span>
           </div>
           <div class="results-toolbar">
             <div class="bulk-bar">
@@ -159,6 +156,42 @@
         </section>
       </section>
 
+      <section id="view-contact" class="app-view" aria-hidden="true">
+        <section class="panel contact-panel">
+          <div class="panel-head">
+            <h2>Contact</h2>
+          </div>
+          <p class="hint contact-hint">Send a question, inquiry, or support request directly from your signed-in Microsoft account.</p>
+          <div class="form-grid">
+            <label class="field">
+              <span>Name</span>
+              <input id="contact-name" type="text" placeholder="Your name" />
+            </label>
+            <label class="field">
+              <span>Category</span>
+              <select id="contact-category">
+                <option value="Question">Question</option>
+                <option value="Inquiry">Inquiry</option>
+                <option value="Support">Support</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+            <label class="field full">
+              <span>Version</span>
+              <input id="contact-version" type="text" readonly />
+            </label>
+            <label class="field full">
+              <span>Message</span>
+              <textarea id="contact-message" placeholder="Tell us what you need help with."></textarea>
+            </label>
+          </div>
+          <div class="contact-actions">
+            <button id="contact-send-button" class="primary-button" type="button">Send Message</button>
+            <p id="contact-status" class="reply-status"></p>
+          </div>
+        </section>
+      </section>
+
       <section id="view-change-log" class="app-view" aria-hidden="true">
         <section class="panel change-log-panel">
           <div class="panel-head">
@@ -167,17 +200,15 @@
           <div class="change-log-shell">
             <article class="change-log-card">
               <div class="change-log-head">
-                <h3>Version 1.4.5</h3>
-                <p class="change-log-date">April 30, 2026</p>
+                <h3>Version 1.5.3</h3>
+                <p class="change-log-date">May 3, 2026</p>
               </div>
               <ul class="change-log-list">
-                <li>Added a new Change Log tab so users can quickly review what has changed between versions.</li>
-                <li>Improved how saved carrier history reconnects with the conversation workflow after refreshes and rescans.</li>
-                <li>Cleaned up carrier message previews so reply clutter and forwarded-email noise are reduced throughout the conversation view.</li>
-                <li>Improved how saved conversation history is matched and carried across the app for a more consistent broker experience.</li>
-                <li>Strengthened account verification for saved user data and improved protection around backend requests.</li>
-                <li>Added additional safeguards around request handling, saved data validation, and browser security policies.</li>
-                <li>Reduced exposure of sensitive browser session data and made production error handling reveal less internal detail.</li>
+                <li>Added a new Contact tab for sending questions, inquiries, and support messages.</li>
+                <li>Contact messages now send from the signed-in Microsoft account.</li>
+                <li>Added category selection, name capture, and automatic version tagging in the contact form.</li>
+                <li>Minor UI changes.</li>
+                <li>Cleaned up the footer by removing extra support copy.</li>
               </ul>
             </article>
 
@@ -252,11 +283,9 @@
       </section>
 
       <footer class="site-footer">
-        <div>Contact fireflytest8888@outlook.com if you encounter a bug or have a suggestion to be added.</div>
         <div>Product is still in its testing phase, use at your own risk.</div>
-        <div>Built and coded with Codex from Open AI.</div>
         <div>www.linkedin.com/in/andrewzoblisein/</div>
-        <div>Version 1.4.5</div>
+        <div>Version 1.5.3</div>
       </footer>
     </main>
   </body>
